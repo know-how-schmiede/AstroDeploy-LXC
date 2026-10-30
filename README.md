@@ -20,11 +20,14 @@ DHCP-Reservierung und Internetzugriff einrichten. Ein unprivilegierter LXC ist
 empfohlen. Docker und zusätzliche Container-Berechtigungen sind nicht erforderlich.
 
 In Proxmox den **Container auswählen und dessen Konsole öffnen**. Dort als root
-anmelden. Diese Befehle gehören nicht in die Konsole des Proxmox-Hosts:
+anmelden. Alle folgenden Befehle gehören in den Debian-Container, nicht auf den
+Proxmox-Host.
+
+Wenn Debian bereits aktualisiert und Python 3 installiert ist, musst du diese
+Vorbereitung nicht wiederholen. Nur falls Git oder die Zertifikate noch fehlen:
 
 ```bash
-apt-get update
-apt-get install -y git ca-certificates python3
+apt-get install -y git ca-certificates
 ```
 
 ## 2. Website vorbereiten
@@ -55,15 +58,36 @@ pushen. Der Build muss `dist/server/entry.mjs` erzeugen.
 
 ## 3. Installer starten
 
-Dieses vollständige Repository nach `/root/AstroDeploy-LXC` in den Container
-kopieren oder von seiner tatsächlichen GitHub-URL klonen. Es gibt noch keine
-festgelegte öffentliche Downloadadresse. Vor Ausführung Code und Version prüfen.
-Dann im Container:
+Du brauchst keine ZIP-Datei herunterzuladen oder Dateien vom PC zu kopieren.
+Hole den Installer direkt aus
+[know-how-schmiede/AstroDeploy-LXC](https://github.com/know-how-schmiede/AstroDeploy-LXC)
+in den Container. Dafür diese Befehle als root eingeben:
 
 ```bash
-cd /root/AstroDeploy-LXC
-bash bin/setup.sh
+git clone https://github.com/know-how-schmiede/AstroDeploy-LXC.git /root/AstroDeploy-LXC
 ```
+
+Danach Code und Version prüfen und das interaktive Setup starten:
+
+```bash
+cd /root/AstroDeploy-LXC && bash bin/setup.sh
+```
+
+**Repository bereits im Container vorhanden?** Dann nicht erneut klonen.
+So bringst du eine unveränderte lokale Kopie auf den aktuellen Stand:
+
+```bash
+git -C /root/AstroDeploy-LXC pull --ff-only
+```
+
+Anschließend wieder mit `cd /root/AstroDeploy-LXC && bash bin/setup.sh` starten.
+Falls Git lokale Änderungen oder einen Konflikt meldet, diese zuerst prüfen;
+das Setup erst nach erfolgreicher Aktualisierung starten.
+
+Internet bleibt erforderlich: Git lädt den Installer aus GitHub; das Setup lädt
+benötigte Debian-Pakete, Node.js und die Abhängigkeiten deiner Website automatisch.
+Ein manueller Download ist nicht nötig. Die im Setup abgefragte GitHub-URL ist
+die URL **deines Astro-Website-Projekts**, nicht die URL dieses Installers.
 
 Das Setup fragt Repository, Branch, Unterordner, Domain/IPv4, Port, Healthcheck
 und HTTPS ab. Vor Änderungen erscheint eine Zusammenfassung. Für einen ersten

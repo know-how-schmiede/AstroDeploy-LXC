@@ -1,6 +1,32 @@
 # Installation und HTTPS
 
-Die Schritte in der README in der Konsole des Debian-Containers ausführen.
+## Direkt aus GitHub installieren
+
+In Proxmox die Konsole des Debian-13-Containers öffnen und als root anmelden.
+Wenn Updates und Python 3 bereits installiert sind, kannst du direkt fortfahren.
+Git und ca-certificates bei Bedarf mit `apt-get install -y git ca-certificates`
+nachinstallieren.
+
+Ohne manuellen ZIP-Download oder Kopieren vom PC:
+
+```bash
+git clone https://github.com/know-how-schmiede/AstroDeploy-LXC.git /root/AstroDeploy-LXC
+```
+
+Code und Version prüfen, danach das Setup starten:
+
+```bash
+cd /root/AstroDeploy-LXC && bash bin/setup.sh
+```
+
+Ist das Repository schon im Container vorhanden, statt erneutem Klonen
+`git -C /root/AstroDeploy-LXC pull --ff-only` verwenden. Erst nach erfolgreicher
+Aktualisierung das Setup starten. Lokale Änderungen werden dabei nicht verworfen.
+
+Die weiteren Eingaben erklärt die [README](../README.md). Im Setup die GitHub-URL
+deiner **Astro-Website** eingeben; das Installer-Repository ist ein anderes Projekt.
+Die Installation braucht Internet und lädt Pakete automatisch herunter.
+
 Nur Repository-Code einsetzen, dem du vertraust: npm-Skripte haben Netzwerkzugriff
 und können Build-Variablen sowie den read-only Deploy-Key dieses Projekts lesen.
 Der Installer ist keine Sandbox für fremde Projekte.

@@ -37,8 +37,9 @@ Fehlt Python beim Start, bietet der Starter dessen Installation auch selbst an.
 ## 2. Website-Repository bereithalten
 
 Du brauchst die GitHub-URL deiner Astro-Website und den Branch (meist `main`).
-Das Repository muss `astro` in der `package.json`, ein Buildskript `astro build`
-und eine eingecheckte `package-lock.json` enthalten. Node/npm auf deinem PC
+Das Repository muss `astro` in der `package.json`, eine eingecheckte
+`package-lock.json` und ein Buildskript mit abschließendem `astro build` enthalten.
+Auch `npm run check && astro build` wird unterstützt; die Prüfung bleibt aktiv. Node/npm auf deinem PC
 werden für die Installation nicht benötigt.
 
 Die neue Vorgabe **„Astro automatisch für diesen Container vorbereiten? ja“**

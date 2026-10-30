@@ -19,7 +19,7 @@ import time
 import urllib.request
 import uuid
 
-VERSION = '0.2.0'
+VERSION = '0.2.1'
 ETC = Path('/etc/astrodeploy')
 STATE = Path('/var/lib/astrodeploy')
 BUILD = Path('/var/lib/astrobuild')
@@ -518,7 +518,7 @@ def setup():
              'node_major': 24, 'keep': 3, 'proxy': '', 'email': ''}
         print('\nContainer-Modus: fehlenden Node-Adapter hier installieren und eine zusätzliche\n'
               'Server-Konfiguration verwenden. GitHub bleibt unverändert; kein Schreibzugriff nötig.\n'
-              'Unterstützt einfache npm-Buildskripte mit "astro build" und objektbasierte Astro-Konfigurationen.')
+              'Unterstützt "astro build", auch nach "npm run check &&", und objektbasierte Astro-Konfigurationen.')
         c['container_prepare'] = yes('Astro automatisch für diesen Container vorbereiten?', True)
         if c['container_prepare']:
             c['adapter_version'] = ask('Feste Node-Adapter-Version für Projekte ohne Adapter', adapter_version(),

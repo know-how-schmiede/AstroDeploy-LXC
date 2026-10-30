@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 – 30.10.2026 (unveröffentlicht)
+
+- Container-Vorbereitung akzeptiert auch `npm run check && astro build`,
+  mehrere vorgeschaltete npm-Aufgaben und `astro check && astro build`.
+- Bestehende Prüfungen bleiben erhalten; Konfigurationsargumente werden nur an
+  den abschließenden Astro-Build übergeben. Mehrdeutige Skripte bleiben ausgeschlossen.
+- Regressionstests für die gemeldete zweite Website und unzulässige Folgekommandos.
+
 ## 0.2.0 – 30.10.2026 (unveröffentlicht)
 
 - Projektvorbereitung vollständig im Container: fehlenden Node-Adapter lokal

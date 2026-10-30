@@ -9,6 +9,7 @@ Zuerst `astroctl status`, `astroctl doctor` und `astroctl logs` aufrufen.
 | Branch nicht gefunden | Branchname einschließlich Groß-/Kleinschreibung prüfen |
 | Buildfehler | Lokal mit Node 24 npm ci --include=dev --engine-strict und npm run build ausführen |
 | Node-Adapter fehlt | Automatische Container-Vorbereitung im Setup einschalten; siehe container-build.md |
+| Container-Vorbereitung benötigt das npm-Buildskript "astro build" | Auf Installer 0.2.1 aktualisieren; dieser unterstützt auch npm run check && astro build. Anschließend Setup fortsetzen, ohne Container-Reset. |
 | Adapter-Installation fehlgeschlagen | Feste Adapter-Version muss zu Astro passen; npm erzwingt keine inkompatiblen Peer-Abhängigkeiten |
 | entry.mjs fehlt | Container-Vorbereitung prüfen; andernfalls Astro-Node-Adapter mit standalone und output server konfigurieren |
 | Healthcheckfehler | Pfad muss ohne Login/Redirect HTTP 200 liefern; Domain und Host prüfen |

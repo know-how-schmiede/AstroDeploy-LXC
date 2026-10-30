@@ -11,6 +11,13 @@ class BuildError(Exception):
     """Only predefined stage codes cross the build/root boundary."""
 
 
+def supports_container_build(script):
+    """npm appends --config to the final command; never bypass preceding checks."""
+    task = r'(?:npm\s+run\s+[A-Za-z0-9_:-]+|astro\s+check)'
+    return isinstance(script, str) and bool(re.fullmatch(
+        rf'(?:{task}\s*&&\s*)*astro\s+build', script.strip()))
+
+
 def check(root, subdir, prepare=False):
     root = Path(root).resolve()
     project = root / subdir
@@ -29,9 +36,10 @@ def check(root, subdir, prepare=False):
         raise ValueError('Dies ist kein unterstütztes Astro-Projekt: astro fehlt in package.json')
     if '@astrojs/node' not in deps and not prepare:
         raise ValueError('Node-Adapter fehlt. Container-Vorbereitung im Setup aktivieren oder @astrojs/node im Projekt ergänzen.')
-    if prepare and package.get('scripts', {}).get('build', '').strip() != 'astro build':
-        raise ValueError('Container-Vorbereitung benötigt das npm-Buildskript "astro build". '
-                         'Für eigene Buildskripte einen fertigen Node-Adapter verwenden und Container-Vorbereitung deaktivieren.')
+    if prepare and not supports_container_build(package.get('scripts', {}).get('build', '')):
+        raise ValueError('Container-Vorbereitung benötigt ein Buildskript mit abschließendem "astro build". '
+                         'Davor sind "npm run AUFGABE &&" und "astro check &&" möglich. '
+                         'Für andere Buildskripte einen fertigen Node-Adapter verwenden und die Vorbereitung deaktivieren.')
     return package
 
 

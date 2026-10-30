@@ -46,6 +46,40 @@ class ContainerBuildTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Buildskript'):
             helper.check(self.project, '.', prepare=True)
 
+    def test_npm_check_before_build_is_supported_and_preserved(self):
+        self.package['scripts']['build'] = 'npm run check && astro build'
+        self.package['scripts']['check'] = 'astro check'
+        self.write_package()
+        helper.check(self.project, '.', prepare=True)
+        self.package['dependencies']['@astrojs/node'] = '^11.0.0'
+        self.write_package()
+        def simulate_npm(project, args, stage):
+            if stage == 'build':
+                # The original npm script must run, including its preceding check.
+                package = json.loads((project / 'package.json').read_text())
+                self.assertEqual(package['scripts']['build'], 'npm run check && astro build')
+                self.assertEqual(args[:2], ['run', 'build'])
+                self.assertEqual(args[2:], ['--', '--config', '.astrodeploy.config.mjs'])
+                entry = project / 'dist/server/entry.mjs'
+                entry.parent.mkdir(parents=True)
+                entry.touch()
+        with patch.object(helper, 'npm', side_effect=simulate_npm):
+            helper.build(self.project, '11.1.9')
+
+    def test_multiple_preparation_tasks_and_astro_check_are_supported(self):
+        for script in ('astro check && astro build',
+                       'npm run generate && npm run check && astro build',
+                       '  npm run check&&astro build  '):
+            with self.subTest(script=script):
+                self.assertTrue(helper.supports_container_build(script))
+
+    def test_config_arguments_cannot_land_on_a_following_command(self):
+        for script in ('astro build && npm run upload', 'astro build; echo done',
+                       'echo "astro build"', 'npm run check || astro build',
+                       'astro build --config other.mjs', 'npm run check\nastro build'):
+            with self.subTest(script=script):
+                self.assertFalse(helper.supports_container_build(script))
+
     def test_original_config_is_not_rewritten(self):
         config = self.project / 'astro.config.mjs'
         original = "export default {site:'https://example.invalid'};\n"

@@ -37,7 +37,13 @@ Lockdatei pflegen und die automatische Vorbereitung ausschalten.
 ## Voraussetzungen und Grenzen
 
 - Astro ist bereits eine Abhängigkeit und eine gültige package-lock.json ist vorhanden.
-- Für automatische Vorbereitung muss das Buildskript genau `astro build` sein.
+- Für automatische Vorbereitung muss das Buildskript mit `astro build` enden.
+  Davor sind eine oder mehrere Aufgaben `npm run NAME &&` sowie `astro check &&`
+  erlaubt, z. B. `npm run check && astro build`. Diese Prüfungen werden weiterhin
+  ausgeführt. Das Tool führt das ursprüngliche npm-Buildskript aus und hängt die
+  Konfigurationsargumente an den abschließenden Astro-Aufruf an.
+  Nachfolgende Befehle, eigene Astro-Flags, Pipes und andere Shell-Konstruktionen
+  bleiben ausgeschlossen, damit die Konfigurationsargumente eindeutig ankommen.
   Vor-/Nachbereitung über npm-prebuild/postbuild läuft weiterhin unter dem Build-Benutzer.
 - Keine oder genau eine astro.config.mjs/js/ts/mts/cjs/cts mit objektbasiertem Export.
   Bestehende `.astrodeploy.config.mjs` wird nicht überschrieben.

@@ -1,8 +1,12 @@
 # Projektvorbereitung und Build im Container
 
+**Seit 0.3.0 gilt dieses Dokument für den ausdrücklich ausgewählten Modus
+`server`.** Der empfohlene Modus `auto` baut mit unveränderter Projektkonfiguration
+und unterstützt auch statisches Hosting. Siehe [Statisches Hosting](static-hosting.md).
+
 Seit Version 0.2.0 kann ein Astro-Projekt ohne Node-Adapter direkt aus GitHub im
 Container vorbereitet und gebaut werden. Ein PC mit Node/npm ist nicht nötig.
-Im Setup „Astro automatisch für diesen Container vorbereiten?“ mit `ja` beantworten.
+Im Setup den Modus `server` wählen und die SSR-Vorbereitung mit `ja` bestätigen.
 
 ## Ablauf
 

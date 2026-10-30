@@ -1,7 +1,8 @@
 # Rollback
 
-`astroctl rollback` aktiviert das vorherige erfolgreiche Release samt Node-Version
-und prüft lokal HTTP 200. Bei Fehler wird das zuvor laufende Release wieder
+`astroctl rollback` aktiviert das vorherige erfolgreiche Release samt Betriebsart
+(statisch oder SSR) und bei SSR dessen Node-Version. Es prüft lokal HTTP 200.
+Bei Fehler wird das zuvor laufende Release wieder
 gestartet. Die Automatik bleibt dauerhaft pausiert.
 
 Problem in GitHub korrigieren, mit `astroctl deploy` testen, dann

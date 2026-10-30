@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -19,13 +20,15 @@ import time
 import urllib.request
 import uuid
 
-VERSION = '0.2.1'
+VERSION = '0.3.0'
 ETC = Path('/etc/astrodeploy')
 STATE = Path('/var/lib/astrodeploy')
 BUILD = Path('/var/lib/astrobuild')
 BASE = Path('/srv/astro')
 TOOLS = Path('/usr/local/lib/astrodeploy')
 NODE = Path('/opt/astrodeploy/node')
+NGINX_LOCATION = Path('/etc/nginx/astrodeploy-location.conf')
+NGINX_SITE = Path('/etc/nginx/sites-available/astrodeploy')
 GH_KEY = 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n'
 
 
@@ -127,6 +130,8 @@ def validate(c):
         raise ValueError('Ungültige Konfiguration in /etc/astrodeploy/config.json')
     if c['tls'] == 'proxy':
         ipaddress.ip_network(c['proxy'], strict=False)
+    if c.get('render_mode', 'server') not in ('auto', 'server'):
+        raise ValueError('render_mode muss auto oder server sein.')
     if not isinstance(c.get('container_prepare', False), bool):
         raise ValueError('container_prepare muss true oder false sein.')
     if c.get('container_prepare') and not re.fullmatch(r'\d+\.\d+\.\d+', c.get('adapter_version', '')):
@@ -247,14 +252,96 @@ def link(path, target):
     os.replace(temp, path)
 
 
+def release_type(release):
+    metadata = release / 'release.json'
+    return json.loads(metadata.read_text()).get('kind', 'server') if metadata.exists() else 'server'
+
+
+def classify_release(release, mode):
+    if (release / 'dist/server/entry.mjs').is_file():
+        return 'server'
+    if mode == 'auto' and (release / 'dist').is_dir() and any(p.is_file() for p in (release / 'dist').rglob('*')):
+        return 'static'
+    raise RuntimeError('Keine passende Buildausgabe in dist. Für SSR wird dist/server/entry.mjs benötigt.')
+
+
+def proxy_location(c):
+    proto = '$astro_proto' if c['tls'] == 'proxy' else '$scheme'
+    return f'''    location / {{
+        proxy_pass http://127.0.0.1:{c['port']};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto {proto};
+    }}'''
+
+
+def location_content(c, kind):
+    if kind == 'server':
+        return proxy_location(c) + '\n'
+    return f'''root {BASE / c['name']}/current/dist;
+index index.html;
+error_page 404 /404.html;
+location / {{
+    try_files $uri $uri/ $uri.html =404;
+}}
+'''
+
+
+def migrate_nginx(c):
+    """Replace only our known location block, preserving Certbot's TLS settings."""
+    site = NGINX_SITE
+    text = site.read_text()
+    include = '    include /etc/nginx/astrodeploy-location.conf;'
+    if include in text:
+        return
+    old = proxy_location(c)
+    if text.count(old) != 1:
+        raise RuntimeError('Eigene Nginx-Konfiguration wurde verändert. Automatische Migration abgebrochen; '
+                           'siehe docs/static-hosting.md.')
+    backup = STATE / 'nginx-before-0.3.conf'
+    if not backup.exists():
+        save(backup, text)
+    save(NGINX_LOCATION, old + '\n', 0o644)
+    save(site, text.replace(old, include), 0o644)
+    try:
+        run(['nginx', '-t'])
+    except Exception:
+        save(site, text, 0o644)
+        raise
+
+
+def configure_runtime(c, kind):
+    migrate_nginx(c)
+    save(NGINX_LOCATION, location_content(c, kind), 0o644)
+    run(['nginx', '-t'])
+    if kind == 'server':
+        run(['systemctl', 'enable', 'astro-site'])
+        run(['systemctl', 'restart', 'astro-site'])
+    run(['systemctl', 'reload', 'nginx'])
+    if kind == 'static':
+        run(['systemctl', 'disable', '--now', 'astro-site'])
+
+
 def healthy(c):
+    kind = release_type(BASE / c['name'] / 'current')
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
-        conn = http.client.HTTPConnection('127.0.0.1', c['port'], timeout=2)
+        conn = http.client.HTTPConnection('127.0.0.1', c['port'] if kind == 'server' else 80, timeout=2)
         try:
             conn.request('GET', c['health'], headers={'Host': c['host']})
-            if conn.getresponse().status == 200 and subprocess.run(
-                    ['systemctl', 'is-active', '--quiet', 'astro-site'], check=False).returncode == 0:
+            status = conn.getresponse().status
+            if kind == 'static' and c['tls'] == 'letsencrypt' and status in (301, 302, 307, 308):
+                conn.close()
+                # Probe the same path locally over TLS; never follow arbitrary redirects.
+                conn = http.client.HTTPConnection('127.0.0.1', 443, timeout=2)
+                raw = socket.create_connection(('127.0.0.1', 443), timeout=2)
+                conn.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=c['host'])
+                conn.request('GET', c['health'], headers={'Host': c['host']})
+                status = conn.getresponse().status
+            if status == 200 and subprocess.run(
+                    ['systemctl', 'is-active', '--quiet', 'astro-site' if kind == 'server' else 'nginx'], check=False).returncode == 0:
                 return True
         except OSError:
             pass
@@ -270,18 +357,21 @@ def activate(c, release):
     old = current.resolve() if current.exists() else None
     link(current, release)
     try:
-        run(['systemctl', 'restart', 'astro-site'])
+        configure_runtime(c, release_type(release))
         if not healthy(c):
             raise RuntimeError('Healthcheck erwartet HTTP 200 am konfigurierten Pfad.')
     except BaseException:
         if old:
             link(current, old)
-            run(['systemctl', 'restart', 'astro-site'])
+            configure_runtime(c, release_type(old))
             if not healthy(c):
                 raise RuntimeError('Auch die wiederhergestellte Version ist nicht erreichbar!') from None
         else:
             current.unlink(missing_ok=True)
             run(['systemctl', 'stop', 'astro-site'])
+            save(NGINX_LOCATION, proxy_location(c) + '\n', 0o644)
+            run(['nginx', '-t'])
+            run(['systemctl', 'reload', 'nginx'])
         raise
     if old and old != release:
         link(base / 'previous', old)
@@ -338,7 +428,8 @@ def _deploy(c, force, node):
         build_command(['git', '-C', str(work), '-c', 'core.hooksPath=/dev/null', 'checkout', '--detach', commit])
         # Check project metadata as the unprivileged user too.
         project = work / c['subdir']
-        preparation = [c['adapter_version']] if c.get('container_prepare') else []
+        mode = c.get('render_mode', 'server')
+        preparation = [c['adapter_version'] if c.get('container_prepare') and mode == 'server' else '-', mode]
         try:
             build_command(['/usr/bin/python3', str(TOOLS / 'build.py'), 'check', str(work), c['subdir'], *preparation], timeout=60)
         except subprocess.CalledProcessError:
@@ -364,7 +455,7 @@ def _deploy(c, force, node):
                 'adapter': 'Node-Adapter konnte nicht installiert werden. Adapter-Version und Astro-Peer-Abhängigkeiten prüfen.',
                 'config': 'Automatische Server-Konfiguration nicht möglich. Siehe docs/container-build.md.',
                 'build': 'Astro-Build fehlgeschlagen. Projekt und Build-Variablen prüfen.',
-                'entry': 'Build erzeugt kein dist/server/entry.mjs. Prerender- und Ausgabeeinstellungen prüfen.',
+                'entry': 'Passende Buildausgabe in dist fehlt. Für SSR wird dist/server/entry.mjs benötigt; Ausgabeeinstellungen prüfen.',
             }
             code = (error.stdout or '').strip().removeprefix('ASTRODEPLOY_ERROR:')
             raise RuntimeError(messages.get(code, 'Container-Build fehlgeschlagen. systemd-Status und docs/troubleshooting.md prüfen.')) from None
@@ -373,18 +464,24 @@ def _deploy(c, force, node):
                           stdout=archive, stderr=subprocess.DEVNULL, timeout=300)
             archive.seek(0)
             safe_extract(archive, release)
-        if not (release / 'dist/server/entry.mjs').is_file():
-            raise RuntimeError('dist/server/entry.mjs fehlt. Astro-Node-Adapter mit standalone konfigurieren.')
+        kind = classify_release(release, mode)
+        if kind == 'static':
+            if (release / 'node_modules').is_symlink():
+                (release / 'node_modules').unlink()
+            else:
+                shutil.rmtree(release / 'node_modules')
         save_json(release / 'release.json', {'commit': commit, 'node': str(node), 'fingerprint': fingerprint,
-                                            'tools': VERSION, 'container_prepare': c.get('container_prepare', False),
+                                            'tools': VERSION, 'kind': kind,
+                                            'container_prepare': c.get('container_prepare', False) and mode == 'server',
                                             'adapter_version': c.get('adapter_version')})
         # Runtime needs read access to metadata, but never write access.
         os.chmod(release / 'release.json', 0o644)
-        (release / 'start').write_text('#!/bin/sh\nexec ' + str(node / 'bin/node') + ' ./dist/server/entry.mjs\n')
-        os.chmod(release / 'start', 0o755)
+        if kind == 'server':
+            (release / 'start').write_text('#!/bin/sh\nexec ' + str(node / 'bin/node') + ' ./dist/server/entry.mjs\n')
+            os.chmod(release / 'start', 0o755)
         activate(c, release)
         cleanup(c)
-        print('Deployment erfolgreich: ' + commit[:12])
+        print('Deployment erfolgreich: ' + commit[:12] + ' | ' + ('statisch über Nginx' if kind == 'static' else 'SSR über Node'))
     finally:
         subprocess.run(['systemctl', 'stop', unit], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         # Never recursively traverse build-owned paths as root.
@@ -438,31 +535,23 @@ RandomizedDelaySec=5s
 [Install]
 WantedBy=timers.target
 ''', 0o644)
-    proto = '$scheme'
     extra = ''
     if c['tls'] == 'proxy':
         network = str(ipaddress.ip_network(c['proxy'], strict=False))
         extra = f'''geo $astro_trusted {{ default 0; {network} 1; }}
 map "$astro_trusted:$http_x_forwarded_proto" $astro_proto {{ default $scheme; "1:https" https; "1:http" http; }}
 '''
-        proto = '$astro_proto'
+    save(NGINX_LOCATION, proxy_location(c) + '\n', 0o644)
     save('/etc/nginx/sites-available/astrodeploy', extra + f'''server {{
     listen 80;
     server_name {c['host']};
-    location / {{
-        proxy_pass http://127.0.0.1:{c['port']};
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto {proto};
-    }}
+    include /etc/nginx/astrodeploy-location.conf;
 }}
 ''', 0o644)
     link(Path('/etc/nginx/sites-enabled/astrodeploy'), Path('/etc/nginx/sites-available/astrodeploy'))
     run(['nginx', '-t'])
     run(['systemctl', 'daemon-reload'])
-    run(['systemctl', 'enable', 'astro-site', 'nginx'])
+    run(['systemctl', 'enable', 'nginx'])
     run(['systemctl', 'restart', 'nginx'])
 
 
@@ -482,6 +571,10 @@ def setup():
         print('Vorhandene Installation gefunden. Konfiguration und Secrets bleiben erhalten.')
         if not yes('Fehlende Einrichtung fortsetzen und erstes Deployment erneut versuchen?'):
             return
+        if 'render_mode' not in c:
+            print('Bisher wurde SSR erzwungen. auto behält die Original-Konfiguration bei und erkennt statische Ausgabe.')
+            c['render_mode'] = ask('Betriebsmodus: auto (empfohlen) oder server (SSR erzwingen)', 'auto', lambda v: v in ('auto', 'server'))
+            save_json(ETC / 'config.json', c)
     else:
         for user in ('astrobuild', 'astrorun'):
             import pwd
@@ -516,10 +609,14 @@ def setup():
              'health': ask('Healthcheck-Pfad (muss ohne Anmeldung HTTP 200 liefern)', '/', lambda v: bool(re.fullmatch(r'/[A-Za-z0-9_./~%-]*', v))),
              'tls': ask('HTTPS: letsencrypt, proxy oder http (HTTP nur im vertrauenswürdigen Netz)', 'http', lambda v: v in ('http', 'proxy', 'letsencrypt')),
              'node_major': 24, 'keep': 3, 'proxy': '', 'email': ''}
-        print('\nContainer-Modus: fehlenden Node-Adapter hier installieren und eine zusätzliche\n'
+        c['render_mode'] = ask('Betriebsmodus: auto (Original-Konfiguration) oder server (SSR erzwingen)',
+                               'auto', lambda v: v in ('auto', 'server'))
+        print('\nauto behält die Rendering-Einstellungen des Projekts bei. Statische Websites liefert Nginx direkt aus.\n'
+              'Im Modus server kann die folgende Vorbereitung SSR erzwingen; für bestehende statische Projekte auto wählen.')
+        print('\nSSR-Vorbereitung: fehlenden Node-Adapter hier installieren und eine zusätzliche\n'
               'Server-Konfiguration verwenden. GitHub bleibt unverändert; kein Schreibzugriff nötig.\n'
               'Unterstützt "astro build", auch nach "npm run check &&", und objektbasierte Astro-Konfigurationen.')
-        c['container_prepare'] = yes('Astro automatisch für diesen Container vorbereiten?', True)
+        c['container_prepare'] = c['render_mode'] == 'server' and yes('SSR automatisch für diesen Container vorbereiten?', True)
         if c['container_prepare']:
             c['adapter_version'] = ask('Feste Node-Adapter-Version für Projekte ohne Adapter', adapter_version(),
                                        lambda v: bool(re.fullmatch(r'\d+\.\d+\.\d+', v)))

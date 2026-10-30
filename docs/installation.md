@@ -41,12 +41,14 @@ Die Installation braucht Internet und lädt Pakete automatisch herunter.
 3. Branch und Projekt-Unterordner auswählen, meist `main` und `.`.
 4. Vorgeschlagene Container-IP mit Enter übernehmen, oder eine Domain eingeben.
 5. Für einen ersten LAN-Test HTTP und Healthcheck `/` wählen.
-6. Automatische Container-Vorbereitung mit `ja` bestätigen. Ein fehlender
-   Node-Adapter wird im Container ergänzt; kein lokales npx und kein Git-Push nötig.
+6. Betriebsmodus `auto` übernehmen. Die ursprüngliche Rendering-Konfiguration
+   bleibt erhalten; statische Websites werden direkt mit Nginx ausgeliefert.
+   Nur für eine bewusste SSR-Umstellung `server` und die optionale Vorbereitung wählen.
 7. Zusammenfassung bestätigen. Bei privatem Repository den neu erzeugten
    öffentlichen Deploy-Key in GitHub hinterlegen, ohne Schreibzugriff.
 8. Build und HTTP-Prüfung abwarten, anschließend die angezeigte Website öffnen
-   und `astroctl doctor` im Container ausführen.
+   und `astroctl doctor` im Container ausführen. Auch mehrere Unterseiten testen;
+   der automatische Healthcheck prüft nur den eingestellten Pfad.
 
 Nach einem Container-Reset ist der Deploy-Key neu. Ein Schlüssel der vorherigen
 Installation reicht dann nicht; den neu angezeigten öffentlichen Key eintragen.

@@ -40,6 +40,22 @@ class ContainerBuildTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'astro fehlt'):
             helper.check(self.project, '.', prepare=True)
 
+    def test_auto_mode_keeps_static_build_without_adapter_or_overlay(self):
+        helper.check(self.project, '.', mode='auto')
+        original = "export default {output:'static'};"
+        config = self.project / 'astro.config.mjs'
+        config.write_text(original)
+        def simulate_npm(project, args, stage):
+            if stage == 'build':
+                self.assertEqual(args, ['run', 'build'])
+                (project / 'dist').mkdir()
+                (project / 'dist/index.html').write_text('prerendered')
+        with patch.object(helper, 'npm', side_effect=simulate_npm) as npm:
+            helper.build(self.project, adapter='11.1.9', mode='auto')
+        self.assertFalse(any(call.args[2] == 'adapter' for call in npm.call_args_list))
+        self.assertFalse((self.project / '.astrodeploy.config.mjs').exists())
+        self.assertEqual(config.read_text(), original)
+
     def test_custom_build_script_not_silently_replaced(self):
         self.package['scripts']['build'] = 'custom-build && astro build'
         self.write_package()

@@ -18,7 +18,7 @@ def supports_container_build(script):
         rf'(?:{task}\s*&&\s*)*astro\s+build', script.strip()))
 
 
-def check(root, subdir, prepare=False):
+def check(root, subdir, prepare=False, mode='server'):
     root = Path(root).resolve()
     project = root / subdir
     if project.is_symlink() or not project.resolve().is_relative_to(root):
@@ -34,9 +34,9 @@ def check(root, subdir, prepare=False):
     deps = package.get('dependencies', {}) | package.get('devDependencies', {})
     if 'astro' not in deps:
         raise ValueError('Dies ist kein unterstütztes Astro-Projekt: astro fehlt in package.json')
-    if '@astrojs/node' not in deps and not prepare:
+    if '@astrojs/node' not in deps and not prepare and mode == 'server':
         raise ValueError('Node-Adapter fehlt. Container-Vorbereitung im Setup aktivieren oder @astrojs/node im Projekt ergänzen.')
-    if prepare and not supports_container_build(package.get('scripts', {}).get('build', '')):
+    if prepare and mode == 'server' and not supports_container_build(package.get('scripts', {}).get('build', '')):
         raise ValueError('Container-Vorbereitung benötigt ein Buildskript mit abschließendem "astro build". '
                          'Davor sind "npm run AUFGABE &&" und "astro check &&" möglich. '
                          'Für andere Buildskripte einen fertigen Node-Adapter verwenden und die Vorbereitung deaktivieren.')
@@ -75,9 +75,9 @@ export default {
     return overlay.name
 
 
-def build(project, adapter=None):
+def build(project, adapter=None, mode='server'):
     npm(project, ['ci', '--include=dev', '--engine-strict'], 'dependencies')
-    if adapter:
+    if adapter and mode == 'server':
         if not re.fullmatch(r'\d+\.\d+\.\d+', adapter):
             raise BuildError('adapter')
         package = json.loads((project / 'package.json').read_text())
@@ -96,20 +96,24 @@ def build(project, adapter=None):
         npm(project, ['run', 'build', '--', '--config', overlay], 'build')
     else:
         npm(project, ['run', 'build'], 'build')
-    if not (project / 'dist/server/entry.mjs').is_file():
+    if mode == 'server' and not (project / 'dist/server/entry.mjs').is_file():
+        raise BuildError('entry')
+    if not (project / 'dist').is_dir() or not any(p.is_file() for p in (project / 'dist').rglob('*')):
         raise BuildError('entry')
 
 
 if __name__ == '__main__':
     if sys.argv[1] == 'check':
         try:
-            check(sys.argv[2], sys.argv[3], prepare=len(sys.argv) > 4)
+            check(sys.argv[2], sys.argv[3], prepare=len(sys.argv) > 4 and sys.argv[4] != '-',
+                  mode=sys.argv[5] if len(sys.argv) > 5 else 'server')
         except (ValueError, OSError) as error:
             print('Projektprüfung: ' + str(error), file=sys.stderr)
             sys.exit(1)
     else:
         try:
-            build(Path.cwd(), sys.argv[2] if len(sys.argv) > 2 else None)
+            build(Path.cwd(), sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] != '-' else None,
+                  mode=sys.argv[3] if len(sys.argv) > 3 else 'server')
         except BuildError as error:
             print('ASTRODEPLOY_ERROR:' + str(error), flush=True)
             sys.exit(1)

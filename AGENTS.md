@@ -1,6 +1,6 @@
 # AstroDeploy-LXC
 
-Eine Astro-SSR-Website pro dediziertem Debian-13-LXC. Deutsche Bedienoberfläche.
+Eine statische oder Astro-SSR-Website pro dediziertem Debian-13-LXC. Deutsche Bedienoberfläche.
 
 ## Sicherheitsinvarianten
 
@@ -13,6 +13,11 @@ Eine Astro-SSR-Website pro dediziertem Debian-13-LXC. Deutsche Bedienoberfläche
 - Releases und Verwaltung bleiben root-eigen, Runtime schreibt nur ins Datenverzeichnis.
 - Buildfehler ändern current nicht; Startfehler stellen vorheriges Release wieder her.
 - Node-Version ist Teil des Releases. Rollback wechselt beide zusammen.
+- Vorgabe auto erhält die Projektkonfiguration. Statische Ausgabe über Nginx,
+  SSR nur bei Node-Serverausgabe. Keine pauschale SSR-Umstellung statischer Projekte.
+- Release-Betriebsart wird gespeichert. Aktivierung und Rollback müssen Nginx,
+  Node-Dienst und lokalen Healthcheck passend umstellen. Bekannte Nginx-Location
+  migrieren, Certbot-TLS erhalten; unbekannte Konfigurationen nicht überschreiben.
 - Globales flock serialisiert Setup und Verwaltungsaktionen.
 - Keine Secrets oder Build-Ausgaben ins Journal oder ins Repository schreiben.
 - Optionaler Container-Modus darf nur die Build-Kopie verändern. Kein Git-Push,

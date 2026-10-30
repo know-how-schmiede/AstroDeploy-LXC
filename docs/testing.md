@@ -4,7 +4,7 @@ Lokal unter Windows geprüft:
 
 - Bash-Syntax aller drei Starter mit Git Bash: bestanden.
 - Python-3.12-Syntax von Orchestrator und Build-Helfer: bestanden.
-- Unit-Tests: 26 bestanden, drei POSIX-Symlink-Tests übersprungen.
+- Unit-Tests: 35 bestanden, vier POSIX-Symlink-Tests übersprungen.
   Geprüft: unveränderter Commit, Buildfehler ohne Aktivierung, Pause,
   normale Extraktion, Stream-Übergabe, Ablehnung gefährlicher Archivpfade/-typen
   sowie sichere Abbrüche bei Downloadfehler und falscher Node-Prüfsumme.
@@ -14,6 +14,9 @@ Lokal unter Windows geprüft:
   Erhalt der ursprünglichen Astro-Version und das Ausblenden von npm-Ausgaben.
   Version 0.2.1 prüft zusätzlich Buildketten mit vorgeschaltetem npm-Check,
   mehrere Aufgaben sowie die Ablehnung mehrdeutiger Folgekommandos.
+  Version 0.3.0 prüft statische Ausgabe ohne Adapter/SSR-Konfiguration,
+  Ausgabeerkennung, Abschaltung des Node-Dienstes, lokale HTTP-/TLS-Prüfung
+  sowie Nginx-Migration mit Erhalt von TLS und Wiederherstellung bei Syntaxfehlern.
 - JS-Konfigurationsprüfung mit dem lokal installierten Node: bestanden. Ein
   Testadapter prüft Import der bestehenden Konfiguration, Erhalt von Integrationen
   und Build-Einstellungen sowie die Umstellung auf Server/Standalone.
@@ -29,7 +32,12 @@ Der zweite Container-Test verwendete die andere Website mit Buildskript
 `npm run check && astro build` und stoppte an der zu engen Skriptprüfung in 0.2.0.
 Das Skript wurde anhand des gemeldeten Commits in einer vorhandenen lokalen
 Website-Kopie bestätigt. Die Prüfung wurde in 0.2.1 korrigiert; die Website selbst
-wurde dabei nicht verändert. Der vollständige Container-Build steht weiter aus.
+wurde dabei nicht verändert.
+
+Nachfolgende Serverprotokolle belegen einen laufenden SSR-Dienst, aber auch
+`undefined.filter`/`RenderUndefinedEntryError` bei ursprünglich statischen
+Routen. Version 0.3.0 führt deshalb den Modus auto und statisches Nginx-Hosting
+ein. Der vollständige Umschaltlauf im Container ist noch nicht durchgeführt.
 
 Linux-CI ist angelegt und führt zusätzlich Symlink-Tests für Wiederherstellung
 und Cleanup aus. Dieser Workflow wurde hier nicht auf GitHub ausgeführt.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 – 30.10.2026 (unveröffentlicht)
+
+- Vorgabe auto baut mit unveränderter Projektkonfiguration statt pauschal SSR zu erzwingen.
+- Statische Websites direkt durch Nginx ausliefern und Node-Runtime deaktivieren.
+- SSR und optionale Adaptervorbereitung bleiben als bewusster Modus server verfügbar.
+- Nginx-Location mit Backup migrieren, vorhandene TLS-Einstellungen erhalten.
+- Release-Betriebsart, Healthchecks und Rollback zwischen statischer/SSR-Ausgabe.
+- Behebt die Ursache fehlender getStaticPaths-Props nach erzwungener SSR-Umstellung.
+
 ## 0.2.1 – 30.10.2026 (unveröffentlicht)
 
 - Container-Vorbereitung akzeptiert auch `npm run check && astro build`,

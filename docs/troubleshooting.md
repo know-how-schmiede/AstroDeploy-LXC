@@ -14,6 +14,8 @@ Zuerst `astroctl status`, `astroctl doctor` und `astroctl logs` aufrufen.
 | entry.mjs fehlt | Container-Vorbereitung prüfen; andernfalls Astro-Node-Adapter mit standalone und output server konfigurieren |
 | Healthcheckfehler | Pfad muss ohne Login/Redirect HTTP 200 liefern; Domain und Host prüfen |
 | 502 | systemctl status astro-site und journalctl -u astro-site -n 100 |
+| HTTP 500 mit undefined filter oder RenderUndefinedEntryError nach SSR-Vorbereitung | Statisches Projekt wurde auf SSR umgestellt. Auf 0.3.0 aktualisieren, Setup fortsetzen und auto wählen; siehe static-hosting.md |
+| astro-site ist inactive/disabled | Bei statischen Releases beabsichtigt: Nginx liefert die Dateien direkt aus |
 | Keine automatischen Updates | Pause, Timerstatus, neuen Commit und zehnminütige Fehlerpause prüfen |
 | Zertifikat fehlt | DNS, IPv6, Ports 80/443 und Router prüfen; Setup fortsetzen |
 | Speicher voll | df -h; Container vergrößern, aktive/vorherige Releases behalten |

@@ -37,27 +37,24 @@ Fehlt Python beim Start, bietet der Starter dessen Installation auch selbst an.
 ## 2. Website-Repository bereithalten
 
 Du brauchst die GitHub-URL deiner Astro-Website und den Branch (meist `main`).
-Das Repository muss `astro` in der `package.json`, eine eingecheckte
-`package-lock.json` und ein Buildskript mit abschließendem `astro build` enthalten.
-Auch `npm run check && astro build` wird unterstützt; die Prüfung bleibt aktiv. Node/npm auf deinem PC
-werden für die Installation nicht benötigt.
+Das Repository muss Astro, eine eingecheckte `package-lock.json` und ein
+npm-Buildskript enthalten. Vorbereitung und Build erfolgen im Container als
+`astrobuild`, niemals als root. Auf deinem PC wird kein Node/npm benötigt.
 
-Die neue Vorgabe **„Astro automatisch für diesen Container vorbereiten? ja“**
-ergänzt einen fehlenden `@astrojs/node`-Adapter ausschließlich in der Build-Kopie.
-Eine zusätzliche Konfiguration übernimmt deine bestehenden Einstellungen und
-setzt Serverausgabe, Standalone-Adapter und den Standard-Ausgabepfad. Der Build
-läuft als `astrobuild`, niemals als root. GitHub bleibt unverändert und der
-Deploy-Key benötigt keinen Schreibzugriff.
+**Vorgabe seit 0.3.0: Betriebsmodus `auto`.** Der Installer führt das ursprüngliche
+Buildskript mit der ursprünglichen Astro-Konfiguration aus. Statische Ausgabe
+in `dist` liefert Nginx direkt aus; für diese Website läuft kein Node-Server.
+Bei einer Node-Standalone-Ausgabe übernimmt der SSR-Dienst. Statische Routen
+mit `getStaticPaths()` und deren `Astro.props` bleiben dadurch erhalten.
 
-Die Adapter-Version wird im Setup angezeigt und fest gespeichert. Bereits im
-Projekt vorhandene Adapter werden aus dessen Lockdatei verwendet. Die gesperrte
-Astro-Version wird beim Ergänzen des Adapters beibehalten. Bei inkompatiblen
-Peer-Abhängigkeiten bricht der Build ab, statt Astro eigenständig zu aktualisieren.
+Nur für ausdrücklich gewünschtes SSR den Modus `server` wählen. Dort kann der
+Installer zusätzlich einen fehlenden Node-Adapter in der Build-Kopie ergänzen
+und Serverausgabe erzwingen. Dies kann statische Projekte inkompatibel machen
+und ist deshalb keine automatische Vorgabe mehr. Details:
+[Statisches Hosting und Migration](docs/static-hosting.md),
+[SSR-Vorbereitung](docs/container-build.md).
 
-Für Projekte mit bereits fertig eingerichteter SSR-Konfiguration oder eigenen
-Buildskripten die automatische Vorbereitung mit `nein` ausschalten. Dann muss
-das Repository selbst `dist/server/entry.mjs` erzeugen.
-Details und Grenzen: [Container-Build](docs/container-build.md).
+Es werden keine Website-Änderungen nach GitHub gepusht; ein read-only Deploy-Key genügt.
 
 ## 3. Installer starten
 
@@ -139,7 +136,8 @@ versucht werden. Standardmäßig bleiben drei Releases sowie aktive/vorherige Ve
 - `/etc/astrodeploy/config.json`: root-eigene Einstellungen.
 - `/etc/astrodeploy/build.env`: Build-Variablen. Nach Änderung `astroctl rebuild`.
 - `/etc/astrodeploy/runtime.env`: Laufzeitvariablen. Nach Änderung
-  `systemctl restart astro-site`. HOST, PORT und NODE_ENV verwaltet das Tool.
+  bei SSR `systemctl restart astro-site`. HOST, PORT und NODE_ENV verwaltet das Tool.
+  Statische Websites verwenden nur Build-Variablen; ihr Node-Dienst bleibt deaktiviert.
 - `/srv/astro/PROJEKT/data`: persistente Daten. Absoluten Pfad in der Anwendung
   konfigurieren; das Release-Arbeitsverzeichnis ist schreibgeschützt.
 - `/srv/astro/PROJEKT/releases`: unveränderliche Releases mit Abhängigkeiten.
@@ -160,15 +158,14 @@ dieser Adresse akzeptiert. [Installation und HTTPS](docs/installation.md).
 Node 24 LTS wird getrennt von globalem Node von nodejs.org installiert und mit
 SHA-256 aus der offiziellen HTTPS-Quelle geprüft. Das ist keine unabhängige
 Signaturprüfung. npm prüft Paket-Engine-Anforderungen strikt. Debian und Node
-werden nur durch bewusste Wartung aktualisiert. Für einen fehlenden Adapter wird
+werden nur durch bewusste Wartung aktualisiert. Im Modus server wird für einen fehlenden Adapter
 zusätzlich die im Setup gespeicherte Version aus der offiziellen npm-Registry
 installiert. Dafür wird nur die temporäre Build-Kopie angepasst.
 
-Nicht unterstützt: rein statisches Hosting ohne Node, mehrere Websites, npm-Workspaces,
+Nicht unterstützt: mehrere Websites, npm-Workspaces,
 Submodule, Git LFS, automatische Datenbankmigrationen und abweichende Buildpfade.
-Der Container-Modus kann eine normale statische Astro-Konfiguration für diesen
-Server auf SSR umstellen. Funktionsexporte und mehrere gleichzeitig vorhandene
-Astro-Konfigurationsdateien werden dabei nicht unterstützt. Ein Unterordner muss
+Im ausdrücklich gewählten SSR-Vorbereitungsmodus werden Funktionsexporte und
+mehrere gleichzeitig vorhandene Astro-Konfigurationsdateien nicht unterstützt. Ein Unterordner muss
 ein eigenständiges npm-Projekt sein. Alte Node-Versionen
 bleiben für Rollbacks erhalten und belegen Speicher. Automatische Werkzeugupdates
 sind noch nicht implementiert.

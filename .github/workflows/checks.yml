@@ -10,7 +10,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: bash -n bin/setup.sh bin/astroctl bin/update.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: bash -n bin/setup.sh
+      - run: bash -n bin/astroctl
+      - run: bash -n bin/update.sh
       - run: shellcheck bin/setup.sh bin/astroctl bin/update.sh
       - run: python -m py_compile lib/astrodeploy.py lib/build.py
       - run: python -m unittest discover -s tests -v

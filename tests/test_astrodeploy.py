@@ -63,12 +63,9 @@ class DeploymentTests(unittest.TestCase):
         (etc / 'build.env').write_bytes(b'')
         node = Path('/opt/astrodeploy/node/v24.0.0')
         commit = 'a' * 40
-        fingerprint = app.hashlib.sha256(commit.encode() + str(node).encode() + b'' + json.dumps(self.c, sort_keys=True).encode()).hexdigest()
-        (current / 'release.json').write_text(json.dumps({'fingerprint': fingerprint}))
         self.c['repo'] = 'https://github.com/test/test'
         self.c['branch'] = 'main'
-        # Recalculate after adding repository configuration.
-        fingerprint = app.hashlib.sha256(commit.encode() + str(node).encode() + json.dumps(self.c, sort_keys=True).encode()).hexdigest()
+        fingerprint = app.hashlib.sha256(commit.encode() + str(node).encode() + json.dumps(self.c, sort_keys=True).encode() + app.VERSION.encode()).hexdigest()
         (current / 'release.json').write_text(json.dumps({'fingerprint': fingerprint}))
         with patch.object(app, 'BASE', self.root), patch.object(app, 'ETC', etc), patch.object(app, 'git', return_value=commit), patch.object(app, 'build_command') as build:
             app._deploy(self.c, False, node)
@@ -92,6 +89,39 @@ class DeploymentTests(unittest.TestCase):
         with patch.object(app, 'STATE', self.root), patch.object(app, '_deploy') as deploy:
             app.deploy(self.c, automatic=True)
             deploy.assert_not_called()
+
+
+class BuildUserTests(unittest.TestCase):
+    def test_commands_do_not_inherit_root_working_directory(self):
+        with patch.object(app, 'run') as run:
+            app.build_command(['git', 'ls-remote', 'https://github.com/example/site.git'])
+        self.assertEqual(run.call_args.kwargs['cwd'], app.BUILD)
+
+
+class SetupTests(unittest.TestCase):
+    def test_default_interface_ip_first_and_invalid_addresses_filtered(self):
+        from types import SimpleNamespace
+        addresses = [
+            {'ifname': 'other', 'addr_info': [{'local': '192.0.2.20'}]},
+            {'ifname': 'eth0', 'addr_info': [{'local': '127.0.0.1'}, {'local': '192.0.2.10'},
+                                          {'local': '169.254.1.2'}, {'local': 'invalid'}]},
+        ]
+        results = [SimpleNamespace(stdout=json.dumps(addresses)),
+                   SimpleNamespace(stdout=json.dumps([{'dev': 'eth0'}]))]
+        with patch.object(app, 'run', side_effect=results):
+            self.assertEqual(app.container_ips(), ['192.0.2.10', '192.0.2.20'])
+
+    def test_ip_detection_without_ip_command_is_optional(self):
+        with patch.object(app, 'run', side_effect=FileNotFoundError):
+            self.assertEqual(app.container_ips(), [])
+
+    def test_private_https_repository_is_converted_to_ssh(self):
+        with patch.object(app, 'ask', return_value='https://github.com/example/site.git'), patch.object(app, 'yes', return_value=True):
+            self.assertEqual(app.repository_prompt(), 'git@github.com:example/site.git')
+
+    def test_public_repository_uses_https(self):
+        with patch.object(app, 'ask', return_value='git@github.com:example/site.git'), patch.object(app, 'yes', return_value=False):
+            self.assertEqual(app.repository_prompt(), 'https://github.com/example/site.git')
 
 
 class ArchiveTests(unittest.TestCase):

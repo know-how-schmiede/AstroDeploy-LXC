@@ -3,8 +3,9 @@
 # AstroDeploy-LXC
 
 Astro-Websites aus GitHub automatisch im Debian-13-Container auf Proxmox deployen.
-Das deutschsprachige Setup richtet Node.js, Nginx und systemd ein. Ein Timer prüft
-den gewählten Branch standardmäßig alle 60 Sekunden.
+Das deutschsprachige Setup richtet Node.js, Nginx und systemd ein. Projektvorbereitung
+und Build laufen vollständig im Container. Ein Timer prüft den gewählten Branch
+standardmäßig alle 60 Sekunden.
 
 ![AstroDeploy-LXC](assets/banner.png)
 
@@ -23,38 +24,39 @@ In Proxmox den **Container auswählen und dessen Konsole öffnen**. Dort als roo
 anmelden. Alle folgenden Befehle gehören in den Debian-Container, nicht auf den
 Proxmox-Host.
 
-Wenn Debian bereits aktualisiert und Python 3 installiert ist, musst du diese
-Vorbereitung nicht wiederholen. Nur falls Git oder die Zertifikate noch fehlen:
+Für einen frisch zurückgesetzten Container zuerst:
 
 ```bash
-apt-get install -y git ca-certificates
+apt-get update
+apt-get install -y git ca-certificates python3
 ```
 
-## 2. Website vorbereiten
+Sind diese Pakete bereits installiert, kannst du diesen Schritt überspringen.
+Fehlt Python beim Start, bietet der Starter dessen Installation auch selbst an.
 
-Unterstützt wird **eine Astro-SSR-Website pro Container**, npm mit eingecheckter
-`package-lock.json` und der Node-Adapter im Standalone-Modus. Im lokalen
-Website-Projekt ausführen:
+## 2. Website-Repository bereithalten
 
-```bash
-npx astro add node
-```
+Du brauchst die GitHub-URL deiner Astro-Website und den Branch (meist `main`).
+Das Repository muss `astro` in der `package.json`, ein Buildskript `astro build`
+und eine eingecheckte `package-lock.json` enthalten. Node/npm auf deinem PC
+werden für die Installation nicht benötigt.
 
-Die Astro-Konfiguration sinngemäß ergänzen; vorhandene Einstellungen beibehalten:
+Die neue Vorgabe **„Astro automatisch für diesen Container vorbereiten? ja“**
+ergänzt einen fehlenden `@astrojs/node`-Adapter ausschließlich in der Build-Kopie.
+Eine zusätzliche Konfiguration übernimmt deine bestehenden Einstellungen und
+setzt Serverausgabe, Standalone-Adapter und den Standard-Ausgabepfad. Der Build
+läuft als `astrobuild`, niemals als root. GitHub bleibt unverändert und der
+Deploy-Key benötigt keinen Schreibzugriff.
 
-```js
-import { defineConfig } from 'astro/config';
-import node from '@astrojs/node';
+Die Adapter-Version wird im Setup angezeigt und fest gespeichert. Bereits im
+Projekt vorhandene Adapter werden aus dessen Lockdatei verwendet. Die gesperrte
+Astro-Version wird beim Ergänzen des Adapters beibehalten. Bei inkompatiblen
+Peer-Abhängigkeiten bricht der Build ab, statt Astro eigenständig zu aktualisieren.
 
-export default defineConfig({
-  output: 'server',
-  adapter: node({ mode: 'standalone' }),
-});
-```
-
-Mit `npm ci && npm run build` lokal prüfen und einschließlich Lockdatei zu GitHub
-pushen. Der Build muss `dist/server/entry.mjs` erzeugen.
-[Offizielle Astro-Anleitung](https://docs.astro.build/en/guides/integrations-guide/node/).
+Für Projekte mit bereits fertig eingerichteter SSR-Konfiguration oder eigenen
+Buildskripten die automatische Vorbereitung mit `nein` ausschalten. Dann muss
+das Repository selbst `dist/server/entry.mjs` erzeugen.
+Details und Grenzen: [Container-Build](docs/container-build.md).
 
 ## 3. Installer starten
 
@@ -90,13 +92,18 @@ Ein manueller Download ist nicht nötig. Die im Setup abgefragte GitHub-URL ist
 die URL **deines Astro-Website-Projekts**, nicht die URL dieses Installers.
 
 Das Setup fragt Repository, Branch, Unterordner, Domain/IPv4, Port, Healthcheck
-und HTTPS ab. Vor Änderungen erscheint eine Zusammenfassung. Für einen ersten
-LAN-Test Container-IP und `http` wählen. Healthcheck `/` muss ohne Anmeldung
+und HTTPS ab. Es zeigt die erkannten IPv4-Adressen und schlägt die Adresse der
+Standard-Netzwerkschnittstelle vor. Mit Enter übernehmen oder eine Domain eintragen.
+Vor Änderungen erscheint eine Zusammenfassung. Für einen ersten LAN-Test
+die vorgeschlagene Container-IP und `http` wählen. Healthcheck `/` muss ohne Anmeldung
 **HTTP 200** liefern; Redirects gelten nicht als Erfolg. Alternativ einen eigenen
 `/health`-Endpunkt anlegen.
 
-Private Repositories: SSH-URL verwenden. Das Setup erzeugt einen Deploy-Key und
-erklärt dessen Eintragung bei GitHub. Details: [GitHub-Zugriff](docs/github.md).
+Bei der Frage **„Ist dieses Website-Repository privat?“** entsprechend antworten.
+Bei `ja` wandelt das Setup auch eine eingegebene HTTPS-URL in eine SSH-URL um,
+erzeugt einen Deploy-Key und erklärt dessen Eintragung bei GitHub. Nach einem
+Container-Reset ist es ein neuer Key; diesen neu bei GitHub hinterlegen.
+Details: [GitHub-Zugriff](docs/github.md).
 
 Vorhandene Nginx-Installationen werden abgelehnt. Bei einer unterbrochenen eigenen
 Einrichtung den Setup-Befehl erneut starten und „fortsetzen“ wählen.
@@ -152,11 +159,16 @@ dieser Adresse akzeptiert. [Installation und HTTPS](docs/installation.md).
 Node 24 LTS wird getrennt von globalem Node von nodejs.org installiert und mit
 SHA-256 aus der offiziellen HTTPS-Quelle geprüft. Das ist keine unabhängige
 Signaturprüfung. npm prüft Paket-Engine-Anforderungen strikt. Debian und Node
-werden nur durch bewusste Wartung aktualisiert.
+werden nur durch bewusste Wartung aktualisiert. Für einen fehlenden Adapter wird
+zusätzlich die im Setup gespeicherte Version aus der offiziellen npm-Registry
+installiert. Dafür wird nur die temporäre Build-Kopie angepasst.
 
-Nicht unterstützt: rein statische Builds, mehrere Websites, npm-Workspaces,
+Nicht unterstützt: rein statisches Hosting ohne Node, mehrere Websites, npm-Workspaces,
 Submodule, Git LFS, automatische Datenbankmigrationen und abweichende Buildpfade.
-Ein Unterordner muss ein eigenständiges npm-Projekt sein. Alte Node-Versionen
+Der Container-Modus kann eine normale statische Astro-Konfiguration für diesen
+Server auf SSR umstellen. Funktionsexporte und mehrere gleichzeitig vorhandene
+Astro-Konfigurationsdateien werden dabei nicht unterstützt. Ein Unterordner muss
+ein eigenständiges npm-Projekt sein. Alte Node-Versionen
 bleiben für Rollbacks erhalten und belegen Speicher. Automatische Werkzeugupdates
 sind noch nicht implementiert.
 

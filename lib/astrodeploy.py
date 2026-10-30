@@ -19,7 +19,7 @@ import time
 import urllib.request
 import uuid
 
-VERSION = '0.1.0'
+VERSION = '0.2.0'
 ETC = Path('/etc/astrodeploy')
 STATE = Path('/var/lib/astrodeploy')
 BUILD = Path('/var/lib/astrobuild')
@@ -72,6 +72,49 @@ def valid_subdir(value):
     return value == '.' or bool(re.fullmatch(r'[A-Za-z0-9_-]+(?:/[A-Za-z0-9_.-]+)*', value)) and '..' not in PurePosixPath(value).parts
 
 
+def container_ips():
+    """Prefer addresses on the default interface; no external connection needed."""
+    try:
+        addresses = json.loads(run(['ip', '-j', '-4', 'address', 'show', 'scope', 'global'],
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                   text=True, timeout=5).stdout)
+        try:
+            routes = json.loads(run(['ip', '-j', '-4', 'route', 'show', 'default'],
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    text=True, timeout=5).stdout)
+            preferred = {route.get('dev') for route in routes}
+        except (OSError, ValueError, subprocess.SubprocessError):
+            preferred = set()
+        result = []
+        for interface in sorted(addresses, key=lambda item: item.get('ifname') not in preferred):
+            for address in interface.get('addr_info', []):
+                try:
+                    ip = ipaddress.IPv4Address(address.get('local', ''))
+                except ipaddress.AddressValueError:
+                    continue
+                if not (ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast):
+                    if str(ip) not in result:
+                        result.append(str(ip))
+        return result
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+
+
+def repository_prompt():
+    repo = ask('GitHub-URL deiner ASTRO-WEBSITE (nicht des Installers)', validate=valid_repo)
+    private = yes('Ist dieses Website-Repository privat?', repo.startswith('git@'))
+    slug = re.sub(r'^(https://github\.com/|git@github\.com:)', '', repo)
+    return ('git@github.com:' if private else 'https://github.com/') + slug
+
+
+def adapter_version():
+    metadata = json.loads(download('https://registry.npmjs.org/@astrojs%2fnode/latest'))
+    version = metadata['version']
+    if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+        raise RuntimeError('Die npm-Registry liefert keine gültige stabile Adapter-Version.')
+    return version
+
+
 def validate(c):
     if not (re.fullmatch(r'[a-z][a-z0-9-]{0,30}', c['name']) and valid_repo(c['repo'])
             and valid_host(c['host']) and valid_subdir(c['subdir'])
@@ -84,6 +127,10 @@ def validate(c):
         raise ValueError('Ungültige Konfiguration in /etc/astrodeploy/config.json')
     if c['tls'] == 'proxy':
         ipaddress.ip_network(c['proxy'], strict=False)
+    if not isinstance(c.get('container_prepare', False), bool):
+        raise ValueError('container_prepare muss true oder false sein.')
+    if c.get('container_prepare') and not re.fullmatch(r'\d+\.\d+\.\d+', c.get('adapter_version', '')):
+        raise ValueError('Für den Container-Modus wird eine feste adapter_version benötigt.')
     return c
 
 
@@ -103,6 +150,9 @@ def lock():
 
 
 def build_command(args, node=None, **kwargs):
+    # The installer is usually started in /root, which astrobuild cannot traverse.
+    # Git inspects cwd even for remote-only commands such as ls-remote.
+    kwargs.setdefault('cwd', BUILD)
     env = ['HOME=' + str(BUILD), 'PATH=' + (str(node / 'bin') + ':' if node else '') + '/usr/bin:/bin',
            'GIT_TERMINAL_PROMPT=0',
            'GIT_SSH_COMMAND=ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes '
@@ -266,7 +316,7 @@ def _deploy(c, force, node):
     base = BASE / c['name']
     repo = BUILD / 'repository.git'
     if not repo.exists():
-        git(c, 'init', '--bare', str(repo))
+        git(c, 'init', '--bare', '--initial-branch=source', str(repo))
     git(c, '--git-dir', str(repo), 'fetch', '--no-tags', '--depth=1', c['repo'], '+refs/heads/' + c['branch'] + ':refs/heads/source')
     commit = git(c, '--git-dir', str(repo), 'rev-parse', 'refs/heads/source', capture=True)
     if not re.fullmatch(r'[0-9a-f]{40,64}', commit):
@@ -275,7 +325,8 @@ def _deploy(c, force, node):
     if node is None:
         node = Path(json.loads((current / 'release.json').read_text())['node']) if current.exists() else install_node(c['node_major'])
     fingerprint = hashlib.sha256(commit.encode() + str(node).encode() +
-                                 (ETC / 'build.env').read_bytes() + json.dumps(c, sort_keys=True).encode()).hexdigest()
+                                 (ETC / 'build.env').read_bytes() + json.dumps(c, sort_keys=True).encode()
+                                 + VERSION.encode()).hexdigest()
     if current.exists() and not force and json.loads((current / 'release.json').read_text())['fingerprint'] == fingerprint:
         print('Keine Änderung; Website ist aktuell.')
         return
@@ -287,11 +338,15 @@ def _deploy(c, force, node):
         build_command(['git', '-C', str(work), '-c', 'core.hooksPath=/dev/null', 'checkout', '--detach', commit])
         # Check project metadata as the unprivileged user too.
         project = work / c['subdir']
-        build_command(['/usr/bin/python3', str(TOOLS / 'build.py'), 'check', str(work), c['subdir']], timeout=60)
+        preparation = [c['adapter_version']] if c.get('container_prepare') else []
+        try:
+            build_command(['/usr/bin/python3', str(TOOLS / 'build.py'), 'check', str(work), c['subdir'], *preparation], timeout=60)
+        except subprocess.CalledProcessError:
+            raise RuntimeError('Projektprüfung fehlgeschlagen. Die Meldung darüber und docs/container-build.md beachten.') from None
         # systemd tracks all lifecycle children and kills leftovers after completion.
         print('Installiere npm-Abhängigkeiten und baue die Website (maximal 30 Minuten).\n'
               'Build-Ausgaben werden zum Schutz von Geheimnissen ausgeblendet.', flush=True)
-        run(['systemd-run', '--quiet', '--wait', '--collect', '--pipe', '--unit=' + unit,
+        build_args = ['systemd-run', '--quiet', '--wait', '--collect', '--pipe', '--unit=' + unit,
              '-p', 'User=astrobuild', '-p', 'Group=astrobuild', '-p', 'KillMode=control-group',
              '-p', 'RuntimeMaxSec=1800', '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077',
              '-p', 'NoNewPrivileges=yes', '-p', 'ProtectSystem=strict', '-p', 'ProtectHome=yes',
@@ -300,16 +355,29 @@ def _deploy(c, force, node):
              '-p', 'Environment=HOME=' + str(BUILD),
              '-p', 'Environment=PATH=' + str(node / 'bin') + ':/usr/bin:/bin',
              '-p', 'WorkingDirectory=' + str(project),
-             '/usr/bin/python3', str(TOOLS / 'build.py'), 'build'],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1900)
+             '/usr/bin/python3', str(TOOLS / 'build.py'), 'build', *preparation]
+        try:
+            run(build_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=1900)
+        except subprocess.CalledProcessError as error:
+            messages = {
+                'dependencies': 'npm ci fehlgeschlagen. Lockdatei, Node-Anforderungen und Registry-Zugriff prüfen.',
+                'adapter': 'Node-Adapter konnte nicht installiert werden. Adapter-Version und Astro-Peer-Abhängigkeiten prüfen.',
+                'config': 'Automatische Server-Konfiguration nicht möglich. Siehe docs/container-build.md.',
+                'build': 'Astro-Build fehlgeschlagen. Projekt und Build-Variablen prüfen.',
+                'entry': 'Build erzeugt kein dist/server/entry.mjs. Prerender- und Ausgabeeinstellungen prüfen.',
+            }
+            code = (error.stdout or '').strip().removeprefix('ASTRODEPLOY_ERROR:')
+            raise RuntimeError(messages.get(code, 'Container-Build fehlgeschlagen. systemd-Status und docs/troubleshooting.md prüfen.')) from None
         with tempfile.TemporaryFile() as archive:
-            build_command(['tar', '-C', str(project), '-cf', '-', 'dist', 'node_modules', 'package.json'],
+            build_command(['tar', '-C', str(project), '-cf', '-', 'dist', 'node_modules', 'package.json', 'package-lock.json'],
                           stdout=archive, stderr=subprocess.DEVNULL, timeout=300)
             archive.seek(0)
             safe_extract(archive, release)
         if not (release / 'dist/server/entry.mjs').is_file():
             raise RuntimeError('dist/server/entry.mjs fehlt. Astro-Node-Adapter mit standalone konfigurieren.')
-        save_json(release / 'release.json', {'commit': commit, 'node': str(node), 'fingerprint': fingerprint})
+        save_json(release / 'release.json', {'commit': commit, 'node': str(node), 'fingerprint': fingerprint,
+                                            'tools': VERSION, 'container_prepare': c.get('container_prepare', False),
+                                            'adapter_version': c.get('adapter_version')})
         # Runtime needs read access to metadata, but never write access.
         os.chmod(release / 'release.json', 0o644)
         (release / 'start').write_text('#!/bin/sh\nexec ' + str(node / 'bin/node') + ' ./dist/server/entry.mjs\n')
@@ -404,6 +472,9 @@ def setup():
         raise RuntimeError('Dieses Setup benötigt Debian 13 im Zielcontainer.')
     if not Path('/run/systemd/system').exists() or os.uname().machine not in ('x86_64', 'aarch64'):
         raise RuntimeError('systemd und amd64/arm64 werden benötigt.')
+    ips = container_ips()
+    print('\nAstroDeploy ' + VERSION + ' – Einrichtung direkt im Debian-Container')
+    print('Erkannte Container-IPv4: ' + (', '.join(ips) if ips else 'keine; Domain/IPv4 bitte selbst eingeben'))
     if shutil.disk_usage('/').free < 5 * 1024**3:
         raise RuntimeError('Bitte mindestens 5 GiB freien Speicher bereitstellen.')
     if (ETC / 'config.json').exists():
@@ -432,19 +503,26 @@ def setup():
             with socket.socket() as sock:
                 sock.bind(('0.0.0.0', port))
         print('\nAstroDeploy – eine Astro-SSR-Website auf Debian 13 einrichten.\n'
-              'Benötigt: GitHub-Repository mit package-lock.json und Astro-Node-Adapter (standalone).\n'
+              'Benötigt: Astro-Repository mit package-lock.json. Der Build läuft hier im Container.\n'
               'Es werden Pakete, zwei Benutzer, Nginx und systemd-Dienste eingerichtet.\n')
         c = {'name': ask('Projektname (Kleinbuchstaben)', 'website', lambda v: bool(re.fullmatch(r'[a-z][a-z0-9-]{0,30}', v))),
-             'repo': ask('GitHub-URL (https://github.com/NAME/REPO oder git@github.com:NAME/REPO.git)', validate=valid_repo),
+             'repo': repository_prompt(),
              'branch': ask('Branch', 'main', lambda v: bool(re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_./-]*', v)) and '..' not in v),
              'subdir': ask('Projekt-Unterordner (. = Repository-Wurzel)', '.', valid_subdir),
-             'host': ask('Domain oder Container-IPv4 (ohne http://)', validate=valid_host),
+             'host': ask('Domain oder Container-IPv4 (ohne http://)', ips[0] if ips else '', valid_host),
              'port': int(ask('Interner Node-Port', '4321', lambda v: v.isdigit() and 1024 <= int(v) <= 65535)),
              'automatic': yes('GitHub automatisch prüfen?', True),
              'interval': int(ask('Prüfintervall in Sekunden', '60', lambda v: v.isdigit() and 30 <= int(v) <= 86400)),
              'health': ask('Healthcheck-Pfad (muss ohne Anmeldung HTTP 200 liefern)', '/', lambda v: bool(re.fullmatch(r'/[A-Za-z0-9_./~%-]*', v))),
              'tls': ask('HTTPS: letsencrypt, proxy oder http (HTTP nur im vertrauenswürdigen Netz)', 'http', lambda v: v in ('http', 'proxy', 'letsencrypt')),
              'node_major': 24, 'keep': 3, 'proxy': '', 'email': ''}
+        print('\nContainer-Modus: fehlenden Node-Adapter hier installieren und eine zusätzliche\n'
+              'Server-Konfiguration verwenden. GitHub bleibt unverändert; kein Schreibzugriff nötig.\n'
+              'Unterstützt einfache npm-Buildskripte mit "astro build" und objektbasierte Astro-Konfigurationen.')
+        c['container_prepare'] = yes('Astro automatisch für diesen Container vorbereiten?', True)
+        if c['container_prepare']:
+            c['adapter_version'] = ask('Feste Node-Adapter-Version für Projekte ohne Adapter', adapter_version(),
+                                       lambda v: bool(re.fullmatch(r'\d+\.\d+\.\d+', v)))
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', c['port']))
         if c['tls'] == 'proxy':
@@ -507,7 +585,12 @@ def setup():
               'Diesen öffentlichen Schlüssel eintragen; Schreibzugriff NICHT aktivieren:')
         build_command(['cat', str(BUILD / '.ssh/deploy.pub')])
         input('Nach dem Speichern bei GitHub Enter drücken … ')
-    git(c, 'ls-remote', '--exit-code', c['repo'], 'refs/heads/' + c['branch'], capture=True)
+    try:
+        git(c, 'ls-remote', '--exit-code', c['repo'], 'refs/heads/' + c['branch'], capture=True)
+    except subprocess.CalledProcessError:
+        raise RuntimeError('GitHub-Zugriff fehlgeschlagen. URL, Branch und Deploy-Key prüfen. '
+                           'Private Repositories benötigen die SSH-URL git@github.com:NAME/REPO.git; '
+                           'Details: docs/github.md. Konfiguration bleibt für Fortsetzung erhalten.') from None
     if c['security_updates']:
         run(['apt-get', 'install', '-y', 'unattended-upgrades'])
         save('/etc/apt/apt.conf.d/52astrodeploy', '''#clear Unattended-Upgrade::Origins-Pattern;
@@ -532,9 +615,9 @@ APT::Periodic::Unattended-Upgrade "1";
     if c['automatic']:
         run(['systemctl', 'enable', '--now', 'astro-deploy.timer'])
     print(f"\nFertig: {'http' if c['tls'] == 'http' else 'https'}://{c['host']}\n"
-          'Verwaltung: astroctl status | astroctl logs | astroctl doctor\n'
-          'Änderungen in GitHub werden nach erfolgreichem Build automatisch veröffentlicht.'
-          if c['automatic'] else '\nFertig. Manuelles Deployment: astroctl deploy')
+          'Verwaltung: astroctl status | astroctl logs | astroctl doctor')
+    print('Änderungen in GitHub werden nach erfolgreichem Build automatisch veröffentlicht.'
+          if c['automatic'] else 'Manuelles Deployment: astroctl deploy')
 
 
 def system_update():

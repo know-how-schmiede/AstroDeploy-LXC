@@ -2,10 +2,16 @@
 
 ## Direkt aus GitHub installieren
 
-In Proxmox die Konsole des Debian-13-Containers öffnen und als root anmelden.
-Wenn Updates und Python 3 bereits installiert sind, kannst du direkt fortfahren.
-Git und ca-certificates bei Bedarf mit `apt-get install -y git ca-certificates`
-nachinstallieren.
+In Proxmox die Konsole des frisch zurückgesetzten Debian-13-Containers öffnen
+und als root anmelden. Einmalig die Voraussetzungen installieren:
+
+```bash
+apt-get update
+apt-get install -y git ca-certificates python3
+```
+
+Sind diese bereits installiert, direkt mit Git fortfahren. Der Starter kann
+fehlendes Python alternativ nach Rückfrage selbst installieren.
 
 Ohne manuellen ZIP-Download oder Kopieren vom PC:
 
@@ -26,6 +32,27 @@ Aktualisierung das Setup starten. Lokale Änderungen werden dabei nicht verworfe
 Die weiteren Eingaben erklärt die [README](../README.md). Im Setup die GitHub-URL
 deiner **Astro-Website** eingeben; das Installer-Repository ist ein anderes Projekt.
 Die Installation braucht Internet und lädt Pakete automatisch herunter.
+
+## Die Eingaben beim Neustart
+
+1. Das Setup zeigt die erkannten Container-IPv4-Adressen.
+2. Website-Repository eingeben; bei privaten Projekten „privat“ bestätigen.
+   Die URL wird dann automatisch für SSH vorbereitet.
+3. Branch und Projekt-Unterordner auswählen, meist `main` und `.`.
+4. Vorgeschlagene Container-IP mit Enter übernehmen, oder eine Domain eingeben.
+5. Für einen ersten LAN-Test HTTP und Healthcheck `/` wählen.
+6. Automatische Container-Vorbereitung mit `ja` bestätigen. Ein fehlender
+   Node-Adapter wird im Container ergänzt; kein lokales npx und kein Git-Push nötig.
+7. Zusammenfassung bestätigen. Bei privatem Repository den neu erzeugten
+   öffentlichen Deploy-Key in GitHub hinterlegen, ohne Schreibzugriff.
+8. Build und HTTP-Prüfung abwarten, anschließend die angezeigte Website öffnen
+   und `astroctl doctor` im Container ausführen.
+
+Nach einem Container-Reset ist der Deploy-Key neu. Ein Schlüssel der vorherigen
+Installation reicht dann nicht; den neu angezeigten öffentlichen Key eintragen.
+Die IP wird automatisch erkannt, aber nicht fest konfiguriert. Bei DHCP eine
+Reservierung im Router setzen. Mehrere IPs werden angezeigt; prüfen, welche aus
+deinem LAN erreichbar ist. Ohne erkannte IPv4 kann eine Domain manuell eingegeben werden.
 
 Nur Repository-Code einsetzen, dem du vertraust: npm-Skripte haben Netzwerkzugriff
 und können Build-Variablen sowie den read-only Deploy-Key dieses Projekts lesen.
@@ -54,6 +81,10 @@ erhalten. Bereits eingerichtete Nginx-/systemd-Dateien werden bei Fortsetzung
 nicht neu erzeugt, damit Certbot-Anpassungen erhalten bleiben. Dies ist kein
 allgemeiner Reparatur- oder Rekonfigurationsmodus. Änderungen an Domain/Port
 erfordern abgestimmte Änderungen von JSON, Units und Nginx.
+
+Der frühere Fehler beim Start aus /root ist behoben: Git-/Build-Aufrufe verwenden
+nun /var/lib/astrobuild als zugängliches Arbeitsverzeichnis. Der normale Einstieg
+`bash bin/setup.sh` funktioniert damit auch unter /root. Der Umweg über /tmp ist unnötig.
 
 Verwaltete Pfade: /etc/astrodeploy, /var/lib/astrodeploy, /var/lib/astrobuild,
 /srv/astro, /opt/astrodeploy/node, /usr/local/lib/astrodeploy,

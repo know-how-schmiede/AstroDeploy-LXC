@@ -15,13 +15,20 @@ Eine Astro-SSR-Website pro dediziertem Debian-13-LXC. Deutsche Bedienoberfläche
 - Node-Version ist Teil des Releases. Rollback wechselt beide zusammen.
 - Globales flock serialisiert Setup und Verwaltungsaktionen.
 - Keine Secrets oder Build-Ausgaben ins Journal oder ins Repository schreiben.
+- Optionaler Container-Modus darf nur die Build-Kopie verändern. Kein Git-Push,
+  kein Schreibzugriff für Deploy-Keys. Vorhandene Konfiguration importieren,
+  keine Textersetzungen in der Originaldatei. Astro-Version niemals automatisch erhöhen.
+- Neue Configfelder sind optional für alte Installationen; automatische
+  Container-Vorbereitung erfordert eine feste Adapter-Version und explizite Setup-Auswahl.
 - Setup niemals auf dem Entwicklungsrechner ausführen. Integrationstests nur
   im ausdrücklich autorisierten Test-LXC durchführen.
 
 ## Tests
 
 ```sh
-bash -n bin/setup.sh bin/astroctl bin/update.sh
+bash -n bin/setup.sh
+bash -n bin/astroctl
+bash -n bin/update.sh
 shellcheck bin/setup.sh bin/astroctl bin/update.sh
 python3 -m py_compile lib/astrodeploy.py lib/build.py
 python3 -m unittest discover -s tests -v

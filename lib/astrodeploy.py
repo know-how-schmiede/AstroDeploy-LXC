@@ -203,6 +203,15 @@ def install_node(major):
     return destination
 
 
+
+def archive_build(project, archive):
+    # npm can install hardlinked files. Emit regular files while keeping symlinks
+    # intact; safe_extract deliberately rejects hardlink archive entries.
+    build_command(['tar', '--hard-dereference', '-C', str(project), '-cf', '-',
+                   'dist', 'node_modules', 'package.json', 'package-lock.json'],
+                  stdout=archive, stderr=subprocess.DEVNULL, timeout=300)
+
+
 def safe_extract(archive, target):
     """Untrusted build tar: no devices, hardlinks, traversal or symlink parents."""
     with (tarfile.open(fileobj=archive) if hasattr(archive, 'read') else tarfile.open(archive)) as tar:
@@ -460,8 +469,7 @@ def _deploy(c, force, node):
             code = (error.stdout or '').strip().removeprefix('ASTRODEPLOY_ERROR:')
             raise RuntimeError(messages.get(code, 'Container-Build fehlgeschlagen. systemd-Status und docs/troubleshooting.md prüfen.')) from None
         with tempfile.TemporaryFile() as archive:
-            build_command(['tar', '-C', str(project), '-cf', '-', 'dist', 'node_modules', 'package.json', 'package-lock.json'],
-                          stdout=archive, stderr=subprocess.DEVNULL, timeout=300)
+            archive_build(project, archive)
             archive.seek(0)
             safe_extract(archive, release)
         kind = classify_release(release, mode)

@@ -262,6 +262,31 @@ class ArchiveTests(unittest.TestCase):
             app.safe_extract(path, target)
             self.assertTrue((target / 'dist/file').is_file())
 
+    @unittest.skipIf(os.name == 'nt', 'Requires GNU tar and POSIX symlinks')
+    def test_build_archive_with_hardlinked_dependencies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / 'project'
+            (project / 'dist').mkdir(parents=True)
+            (project / 'node_modules').mkdir()
+            (project / 'dist/index.html').write_text('built website')
+            for name in ('package.json', 'package-lock.json'):
+                (project / name).write_text('{}')
+            original = project / 'node_modules/original.js'
+            original.write_text('dependency content')
+            os.link(original, project / 'node_modules/duplicate.js')
+            os.symlink('original.js', project / 'node_modules/alias.js')
+            with tempfile.TemporaryFile() as archive:
+                # Exercise the production archiver without requiring astrobuild.
+                with patch.object(app, 'build_command', side_effect=app.run):
+                    app.archive_build(project, archive)
+                archive.seek(0)
+                target = Path(tmp) / 'release'
+                app.safe_extract(archive, target)
+            self.assertEqual((target / 'dist/index.html').read_text(), 'built website')
+            for name in ('original.js', 'duplicate.js', 'alias.js'):
+                self.assertEqual((target / 'node_modules' / name).read_text(), 'dependency content')
+            self.assertTrue((target / 'node_modules/alias.js').is_symlink())
+
     def test_stream_handoff(self):
         with tempfile.TemporaryDirectory() as tmp:
             stream = self.archive([('dist/file', tarfile.REGTYPE, '')])

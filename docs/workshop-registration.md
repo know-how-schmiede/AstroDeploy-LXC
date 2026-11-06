@@ -20,7 +20,21 @@ abweichende Jobpfade werden vor dem Releasewechsel abgewiesen.
 
 ## Private Einstellungen und Freigabe
 
-### Ausdrücklich freigegebener HTTP-Betrieb
+### Optionaler unverschlüsselter SMTP-Versand
+
+Am 06.11.2026 ausdrücklich beauftragt: wie bei NeoFab über `141.47.2.1:25`
+ohne SSL/STARTTLS senden. Nur `"SMTP_ALLOW_INSECURE_PLAIN": "true"` in der
+privaten Workshop-Konfiguration aktiviert diesen Modus. Ohne das Feld oder mit
+`"false"` bleibt die bisherige TLS-Konfiguration erhalten. Die Website setzt bei
+Freigabe `secure=false`, `requireTLS=false`, `ignoreTLS=true`; Zertifikatsprüfungen
+für TLS-Verbindungen werden nicht abgeschaltet. Mailinhalte, Abmeldelinks und
+gegebenenfalls SMTP-Zugangsdaten werden in diesem Modus unverschlüsselt übertragen.
+Neue Vorlage und Installer gemeinsam aktualisieren, vorhandene private JSON-Datei
+manuell ergänzen und `astro-site` neu starten. Der Wartungsdienst liest die Datei
+bei jedem Lauf; offene Mailaufträge werden nach ihrem Wiederholungsintervall bedient.
+Kein automatischer Versandtest durch Setup oder Diagnose.
+
+### HTTP-Freigabe
 
 Für den Hochschulserver wurde am 06.11.2026 HTTP ausdrücklich beauftragt.
 Optional erlaubt `"REGISTRATION_ALLOW_INSECURE_HTTP": "true"` im Workshop-Profil

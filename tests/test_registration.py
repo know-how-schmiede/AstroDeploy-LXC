@@ -49,6 +49,17 @@ class RegistrationTests(unittest.TestCase):
     def metadata(self, release, profile, node='/opt/astrodeploy/node/v24.12.0', kind='server'):
         (release / 'release.json').write_text(json.dumps({'kind': kind, 'node': node, 'runtime_profile': profile}))
 
+    def test_optional_plain_smtp_template_field(self):
+        path = self.release / app.PROFILE['config']['template']
+        value = json.loads(path.read_text())
+        value['SMTP_ALLOW_INSECURE_PLAIN'] = 'false'
+        path.write_text(json.dumps(value))
+        self.assertEqual(app.checked_profile(self.release, 'server'), self.manifest)
+        value['UNKNOWN_SMTP_OPTION'] = 'true'
+        path.write_text(json.dumps(value))
+        with self.assertRaises(ValueError):
+            app.checked_profile(self.release, 'server')
+
     def test_contract_and_legacy_opt_in(self):
         self.assertEqual(app.checked_profile(self.release, 'server'), self.manifest)
         self.metadata(self.release, None, kind='static')

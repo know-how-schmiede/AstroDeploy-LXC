@@ -388,7 +388,7 @@ def checked_profile(release, kind, profile_id=PROFILE_ID):
         regular_release_file(release, relative)
     template = limited_json(release / expected['config']['template'])
     required = set(profile_fields(expected))
-    optional = {'REGISTRATION_ALLOW_INSECURE_HTTP'} if profile_id == PROFILE_ID else set()
+    optional = {'REGISTRATION_ALLOW_INSECURE_HTTP', 'SMTP_ALLOW_INSECURE_PLAIN'} if profile_id == PROFILE_ID else set()
     if not isinstance(template, dict) or not required <= set(template) or not set(template) <= required | optional or any(
             not isinstance(v, str) or len(v) > 8192 or any(ord(ch) < 32 for ch in v)
             for v in template.values()):

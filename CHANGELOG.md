@@ -39,3 +39,20 @@
 - Werkzeug-Selbstupdate und Linux-Live-Abnahme stehen aus.
 - Git-Aufrufe als astrobuild verwenden ein zugängliches Arbeitsverzeichnis,
   auch wenn der Installer aus /root gestartet wird.
+
+## 0.4.0 – 2026-11-06
+
+- Explizites Workshop-Laufzeitprofil mit strengem Schema-1-Artefaktvertrag.
+- Getrennte private JSON-Konfiguration und dauerhaftes Installer-Secret.
+- Gehärteter Wartungstimer mit Release-Node und Aktivierungs-/Rollback-Abgleich.
+- Datenschutz im vorhandenen nginx-Proxy, Profildiagnose und SQLite-Backup als astrorun.
+- Vertrags-, Sandbox-, nginx- und Aktivierungsregressionstests; LXC-Abnahme offen.
+
+## 0.5.0 – 2026-11-06
+
+- Allgemeines optionales Profil `forms` für beliebige Website-Repositories mit
+  festem, geprüftem Formular-Artefaktvertrag, ohne Workshop-/Event-Abhängigkeiten.
+- Getrennte private Formular-Konfiguration und Datenbank ohne MakerLab-SMTP-Werte.
+- Gemeinsamer sicherer Lifecycle, profilbezogene Startbedingung und Verwaltung
+  über `forms-admin` / `forms-backup`; Workshop-Vertrag und alte Befehle erhalten.
+- Dokumentierter Vertrag für Website-Implementierungen und fünf zusätzliche Tests.

@@ -92,3 +92,11 @@ Verwaltete Pfade: /etc/astrodeploy, /var/lib/astrodeploy, /var/lib/astrobuild,
 /srv/astro, /opt/astrodeploy/node, /usr/local/lib/astrodeploy,
 /usr/local/bin/astroctl, drei systemd-Units und der Nginx-vHost astrodeploy.
 Ein automatischer Deinstaller ist nicht enthalten.
+
+## Optionale Workshop-Anmeldung
+
+Ab 0.5.0 wählt das Setup zwischen `keines`, `forms` und
+`workshop-registration`. Für andere Website-Repos das allgemeine Profil
+`forms` verwenden, sofern sie das [Formularpaket](forms.md) bereitstellen.
+
+Im frischen Setup ausdrücklich auswählen; für MakerLab Projekt `website`, Modus `auto`, vorhandenen Adapter behalten und Healthcheck `/health/` verwenden. Anmeldung bleibt deaktiviert. Private Konfiguration und Freigabe: [Workshop-Anmeldung](workshop-registration.md).

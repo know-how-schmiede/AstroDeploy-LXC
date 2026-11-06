@@ -31,3 +31,11 @@ Uploads, SQLite und Sessions explizit nach /srv/astro/PROJEKT/data konfigurieren
 Das Tool erzeugt keine automatischen Symlinks für Anwendungsdaten.
 doctor prüft grundlegende Rechte, aber keine vollständigen ACLs oder öffentliche
 Erreichbarkeit und ersetzt kein Sicherheitsaudit.
+
+## Workshop-Anmeldung
+
+Für das allgemeine [Formularprofil](forms.md) gelten dieselben Prüfungen mit
+`forms.json`, `FORMS_CONFIG`, `FORMS_DB` und `forms.sqlite`. Leere SMTP-Felder
+sind dort beabsichtigt und müssen vom jeweiligen Betreiber ergänzt werden.
+
+`astroctl doctor` prüft Profil, Timer, Config-Lesbarkeit als astrorun und Datenrechte ohne private Werte. `/etc/astrodeploy` bleibt 0700; JSON gehört nach `/etc/astrodeploy-runtime/registration.json` (root:astrorun, 0640; Elternverzeichnis 0750). Alte `/var/lib/makerlab`-Verweise korrigieren. Unbekannter Profilvertrag oder fehlendes Paket stoppt vor Aktivierung. Inaktiver oneshot zwischen Läufen ist normal; deaktivierte Anmeldung überspringt den Worker. TLS/STARTTLS, allowedDomains, Datenschutz und weitere Freigabepunkte: [Workshop-Anmeldung](workshop-registration.md).

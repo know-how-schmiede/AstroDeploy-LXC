@@ -27,3 +27,11 @@ erst GitHubs offizielle Meldung prüfen, dann den hinterlegten Key aktualisieren
 
 Keine Webhooks nötig. Ausgehend müssen GitHub-SSH (Port 22) bzw. HTTPS sowie
 npm-Registry und nodejs.org erreichbar sein.
+
+## Website-Artefakt für Workshop-Anmeldung
+
+Andere Repositories können unabhängig von MakerLab das allgemeine
+[Formularpaket](forms.md) unter `dist/server/forms/` liefern und ausdrücklich
+das Profil `forms` wählen. Eine Repo-Datei allein aktiviert kein Profil.
+
+Vor dem LXC-Test muss `know-how-schmiede/technik-makerspace-website`, Branch `main`, das postbuild-Paket `dist/server/registration/` mit Schema-1-Vertrag liefern. Neuer Deploy-Key ausschließlich read-only; kein separater Website-Updater und keine privaten JSON-/SQLite-/SMTP-Dateien in Git oder dist. Details: [Workshop-Anmeldung](workshop-registration.md).

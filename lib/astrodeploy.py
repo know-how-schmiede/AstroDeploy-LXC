@@ -9,6 +9,8 @@ import os
 import posixpath
 from pathlib import Path, PurePosixPath
 import re
+import secrets
+import stat
 import shutil
 import socket
 import ssl
@@ -20,7 +22,73 @@ import time
 import urllib.request
 import uuid
 
-VERSION = '0.3.0'
+VERSION = '0.5.0'
+RUNTIME = Path('/etc/astrodeploy-runtime')
+SYSTEMD = Path('/etc/systemd/system')
+PROFILE_ID = 'workshop-registration'
+JOB = 'astro-registration-maintenance'
+PACKAGE = 'dist/server/registration/'
+PROFILE = {
+    'schemaVersion': 1, 'id': PROFILE_ID,
+    'config': {'template': PACKAGE + 'deploy/registration.config.example.json',
+               'filename': 'registration.json', 'environmentVariable': 'REGISTRATION_CONFIG',
+               'dataFileFields': {'REGISTRATION_DB': 'workshops.sqlite'}},
+    'jobs': [{'id': 'registration-maintenance',
+              'entry': PACKAGE + 'scripts/registration-maintenance.mjs', 'intervalSeconds': 60}],
+    'tools': {'admin': PACKAGE + 'scripts/registration-admin.mjs',
+              'backup': PACKAGE + 'deploy/backup-registration-db.mjs'},
+}
+REGISTRATION_FIELDS = (
+    'REGISTRATION_ENABLED REGISTRATION_TEST_MODE REGISTRATION_ORIGIN REGISTRATION_SECRET '
+    'REGISTRATION_EMAIL_DOMAINS REGISTRATION_PRIVACY_NOTICE REGISTRATION_RETENTION_DAYS '
+    'REGISTRATION_ADMIN_USER REGISTRATION_ADMIN_PASSWORD_HASH REGISTRATION_DB '
+    'SMTP_HOST SMTP_PORT SMTP_FROM SMTP_SECURE SMTP_REQUIRE_TLS SMTP_USER SMTP_PASSWORD'
+).split()
+FORMS_ID = 'forms'
+FORMS_PACKAGE = 'dist/server/forms/'
+FORMS_PROFILE = {
+    'schemaVersion': 1, 'id': FORMS_ID,
+    'config': {'template': FORMS_PACKAGE + 'forms.config.example.json',
+               'filename': 'forms.json', 'environmentVariable': 'FORMS_CONFIG',
+               'dataFileFields': {'FORMS_DB': 'forms.sqlite'}},
+    'jobs': [{'id': 'forms-maintenance', 'entry': FORMS_PACKAGE + 'maintenance.mjs',
+              'intervalSeconds': 60}],
+    'tools': {'admin': FORMS_PACKAGE + 'admin.mjs', 'backup': FORMS_PACKAGE + 'backup.mjs'},
+}
+PROFILES = {PROFILE_ID: PROFILE, FORMS_ID: FORMS_PROFILE}
+
+
+def profile_spec(profile_id):
+    if not isinstance(profile_id, str) or profile_id not in PROFILES:
+        raise ValueError('Unbekanntes Laufzeitprofil.')
+    return PROFILES[profile_id]
+
+
+def profile_prefix(profile):
+    return 'FORMS' if profile['id'] == FORMS_ID else 'REGISTRATION'
+
+
+def profile_fields(profile):
+    prefix = profile_prefix(profile)
+    return [name.replace('REGISTRATION_', prefix + '_') for name in REGISTRATION_FIELDS]
+
+
+def initial_runtime_config(c, release, profile):
+    value = limited_json(regular_release_file(release, profile['config']['template']))
+    prefix = profile_prefix(profile)
+    dbfield, filename = next(iter(profile['config']['dataFileFields'].items()))
+    value.update({prefix + '_ENABLED': 'false', prefix + '_TEST_MODE': 'false',
+                  prefix + '_SECRET': secrets.token_urlsafe(48),
+                  prefix + '_ORIGIN': ('http' if c['tls'] == 'http' else 'https') + '://' + c['host'],
+                  dbfield: str(BASE / c['name'] / 'data' / filename),
+                  'SMTP_SECURE': 'false', 'SMTP_REQUIRE_TLS': 'true'})
+    if profile['id'] == PROFILE_ID:
+        value.update(SMTP_HOST='141.47.2.1', SMTP_PORT='25', SMTP_FROM='MakerLabTechnik@hs-pforzheim.de')
+    else:
+        # Generic installations must never inherit another operator's mail relay.
+        for key in ('SMTP_HOST', 'SMTP_PORT', 'SMTP_FROM', 'SMTP_USER', 'SMTP_PASSWORD'):
+            value[key] = ''
+    return value
 ETC = Path('/etc/astrodeploy')
 STATE = Path('/var/lib/astrodeploy')
 BUILD = Path('/var/lib/astrobuild')
@@ -119,6 +187,8 @@ def adapter_version():
 
 
 def validate(c):
+    if c.get('runtime_profile') not in (None, PROFILE_ID, FORMS_ID):
+        raise ValueError('Unbekanntes runtime_profile.')
     if not (re.fullmatch(r'[a-z][a-z0-9-]{0,30}', c['name']) and valid_repo(c['repo'])
             and valid_host(c['host']) and valid_subdir(c['subdir'])
             and re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_./-]*', c['branch'])
@@ -266,6 +336,202 @@ def release_type(release):
     return json.loads(metadata.read_text()).get('kind', 'server') if metadata.exists() else 'server'
 
 
+def regular_release_file(release, relative):
+    # No symlinks, including internal links, anywhere in a profile path.
+    if not isinstance(relative, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*', relative):
+        raise ValueError('Ungültiger Profilpfad.')
+    parts = PurePosixPath(relative).parts
+    if any(p in ('.', '..') for p in parts):
+        raise ValueError('Ungültiger Profilpfad.')
+    path = release
+    for part in parts:
+        path = path / part
+        if path.is_symlink():
+            raise ValueError('Symlink im Profilpfad.')
+    if not path.is_file() or not stat.S_ISREG(path.stat().st_mode):
+        raise ValueError('Profildatei fehlt oder ist nicht regulär.')
+    return path
+
+
+def limited_json(path):
+    if path.stat().st_size > 32768:
+        raise ValueError('Profil-JSON ist zu groß.')
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('Doppelter JSON-Schlüssel im Profil.')
+            result[key] = value
+        return result
+    try:
+        return json.loads(path.read_text(encoding='utf-8'), object_pairs_hook=unique)
+    except (UnicodeError, json.JSONDecodeError):
+        raise ValueError('Ungültiges Profil-JSON.') from None
+
+
+def checked_profile(release, kind, profile_id=PROFILE_ID):
+    expected = profile_spec(profile_id)
+    package = FORMS_PACKAGE if profile_id == FORMS_ID else PACKAGE
+    value = limited_json(regular_release_file(release, package + 'profile.json'))
+    # Serialized comparison also rejects bool/float where integer 1/60 is required.
+    if json.dumps(value, sort_keys=True) != json.dumps(expected, sort_keys=True):
+        raise ValueError('Laufzeitprofil: ausschließlich der gewählte bekannte Schema-1-Vertrag wird unterstützt.')
+    if kind != 'server':
+        raise ValueError('Formular-/Workshop-Profil benötigt Node-Serverausgabe.')
+    extra = [
+                     *(PACKAGE + 'src/server/' + name for name in
+                       ('registration-config.mjs', 'registrations.mjs', 'registration-mail.mjs')),
+                     PACKAGE + 'src/content/events.json'] if profile_id == PROFILE_ID else []
+    for relative in [expected['config']['template'], expected['jobs'][0]['entry'],
+                     *expected['tools'].values(), *extra]:
+        regular_release_file(release, relative)
+    template = limited_json(release / expected['config']['template'])
+    if not isinstance(template, dict) or set(template) != set(profile_fields(expected)) or any(
+            not isinstance(v, str) or len(v) > 8192 or any(ord(ch) < 32 for ch in v)
+            for v in template.values()):
+        raise ValueError('Profil-Konfigurationsvorlage: bekannte String-Felder erforderlich.')
+    return value
+
+
+def release_profile(release):
+    path = release / 'release.json'
+    metadata = json.loads(path.read_text()) if path.exists() else {}
+    value = metadata.get('runtime_profile')
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError('Ungültige Profilmetadaten im Release.')
+    checked = checked_profile(release, metadata.get('kind'), value.get('id'))
+    if value != checked:
+        raise ValueError('Ungültige Profilmetadaten im Release.')
+    return checked
+
+
+def prepare_registration(c, release):
+    profile = release_profile(release)
+    if not profile:
+        return
+    import grp
+    gid = grp.getgrnam('astrorun').gr_gid
+    if RUNTIME.is_symlink():
+        raise ValueError('Unsicheres Runtime-Verzeichnis.')
+    RUNTIME.mkdir(mode=0o750, exist_ok=True)
+    os.chown(RUNTIME, 0, gid)
+    os.chmod(RUNTIME, 0o750)
+    path = RUNTIME / profile['config']['filename']
+    if path.is_symlink():
+        raise ValueError('Unsichere Runtime-Konfiguration.')
+    if not path.exists():
+        value = initial_runtime_config(c, release, profile)
+        save_json(path, value)
+    if not path.is_file():
+        raise ValueError('Runtime-Konfiguration ist keine reguläre Datei.')
+    os.chown(path, 0, gid)
+    os.chmod(path, 0o640)
+    env = ETC / 'runtime.env'
+    content = env.read_text(encoding='utf-8')
+    # EnvironmentFile supports continuations: refuse ambiguous edits rather than
+    # accidentally adding our assignment inside another variable's value.
+    for line in content.splitlines():
+        if not line.strip() or line.lstrip().startswith(('#', ';')):
+            continue
+        quote, escaped = None, False
+        for char in line:
+            if escaped:
+                escaped = False
+            elif char == '\\' and quote != "'":
+                escaped = True
+            elif char == quote:
+                quote = None
+            elif char in ('"', "'") and quote is None:
+                quote = char
+        if escaped or quote:
+            raise ValueError('runtime.env: Mehrzeilige Werte vor Profileinrichtung auflösen.')
+    variable = profile['config']['environmentVariable']
+    lines = [line for line in content.splitlines(keepends=True)
+             if not re.match(r'^\s*' + re.escape(variable) + r'\s*=', line)]
+    new = ''.join(lines).rstrip('\n') + '\n' + variable + '=' + str(path) + '\n'
+    if new != content:
+        save(env, new, stat.S_IMODE(env.stat().st_mode))
+
+
+def job_state():
+    if not (SYSTEMD / (JOB + '.service')).exists():
+        return None
+    def query(action):
+        return subprocess.run(['systemctl', action, '--quiet', JOB + '.timer'],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
+    return (query('is-enabled'), query('is-active'))
+
+
+def stop_registration():
+    if (SYSTEMD / (JOB + '.service')).exists():
+        # A failed stop aborts activation/cleanup. Never remove a running job's release.
+        run(['systemctl', 'stop', JOB + '.timer'])
+        run(['systemctl', 'stop', JOB + '.service'])
+
+
+def configure_registration(c, release):
+    profile = release_profile(release)
+    service = SYSTEMD / (JOB + '.service')
+    timer = SYSTEMD / (JOB + '.timer')
+    if not profile:
+        if service.exists():
+            run(['systemctl', 'disable', '--now', JOB + '.timer'])
+            service.unlink()
+            timer.unlink(missing_ok=True)
+            run(['systemctl', 'daemon-reload'])
+        return
+    node = json.loads((release / 'release.json').read_text())['node']
+    if not re.fullmatch(re.escape(str(NODE)) + r'/v24\.\d+\.\d+', node):
+        raise ValueError('Ungültige Release-Node-Version.')
+    base = BASE / c['name']
+    save(service, f'''[Unit]
+Description=Astro Formular Wartung
+After=network.target
+[Service]
+Type=oneshot
+User=astrorun
+Group=astrorun
+WorkingDirectory={base}/current
+ExecStart={node}/bin/node {profile['jobs'][0]['entry']}
+EnvironmentFile=/etc/astrodeploy/runtime.env
+ExecCondition=/usr/bin/python3 /usr/local/lib/astrodeploy/astrodeploy.py registration-enabled {profile['id']}
+TimeoutStartSec=50s
+TimeoutStopSec=20s
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths={base}/data
+InaccessiblePaths=/var/lib/astrobuild /var/lib/astrodeploy
+StandardOutput=null
+StandardError=null
+''', 0o644)
+    save(timer, '''[Unit]
+Description=Astro Formular Wartungstimer
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=60s
+Unit=astro-registration-maintenance.service
+[Install]
+WantedBy=timers.target
+''', 0o644)
+    run(['systemctl', 'daemon-reload'])
+
+
+def start_registration(release, state=None):
+    if release_profile(release):
+        if state is None or state[0]:
+            run(['systemctl', 'enable', JOB + '.timer'])
+        else:
+            run(['systemctl', 'disable', JOB + '.timer'])
+        if state is None or state[1]:
+            run(['systemctl', 'start', JOB + '.timer'])
+
+
 def classify_release(release, mode):
     if (release / 'dist/server/entry.mjs').is_file():
         return 'server'
@@ -323,8 +589,30 @@ def migrate_nginx(c):
 
 def configure_runtime(c, kind):
     migrate_nginx(c)
-    save(NGINX_LOCATION, location_content(c, kind), 0o644)
-    run(['nginx', '-t'])
+    original = NGINX_LOCATION.read_text() if NGINX_LOCATION.exists() else None
+    desired = location_content(c, kind)
+    profile = release_profile(BASE / c['name'] / 'current')
+    privacy = '        access_log off; # astrodeploy registration privacy\n'
+    # Keep existing ACL/auth directives inside the very same proxy location.
+    if original and kind == 'server' and original != desired:
+        clean = original.replace(privacy, '')
+        if (clean.count('location / {') != 1 or clean.count('location ') != 1
+                or clean.count('proxy_pass ') != 1
+                or f'proxy_pass http://127.0.0.1:{c["port"]};' not in clean):
+            raise RuntimeError('Unbekannte Nginx-Location; manuelle Prüfung erforderlich.')
+        desired = clean
+    elif original and kind == 'static' and original.replace(privacy, '') not in (
+            location_content(c, 'static'), location_content(c, 'server')):
+        raise RuntimeError('Angepasste Nginx-Location vor static-Wechsel manuell prüfen.')
+    if profile:
+        desired = desired.replace('location / {\n', 'location / {\n' + privacy, 1)
+    save(NGINX_LOCATION, desired, 0o644)
+    try:
+        run(['nginx', '-t'])
+    except BaseException:
+        if original is not None:
+            save(NGINX_LOCATION, original, 0o644)
+        raise
     if kind == 'server':
         run(['systemctl', 'enable', 'astro-site'])
         run(['systemctl', 'restart', 'astro-site'])
@@ -364,19 +652,35 @@ def activate(c, release):
     base = BASE / c['name']
     current = base / 'current'
     old = current.resolve() if current.exists() else None
-    link(current, release)
+    profile = release_profile(release)
+    if profile:
+        prepare_registration(c, release)
+    state = job_state()
+    stop_registration()
     try:
+        link(current, release)
+        configure_registration(c, release)
         configure_runtime(c, release_type(release))
         if not healthy(c):
             raise RuntimeError('Healthcheck erwartet HTTP 200 am konfigurierten Pfad.')
+        start_registration(release)
     except BaseException:
+        stop_registration()
         if old:
             link(current, old)
+            configure_registration(c, old)
             configure_runtime(c, release_type(old))
             if not healthy(c):
                 raise RuntimeError('Auch die wiederhergestellte Version ist nicht erreichbar!') from None
+            start_registration(old, state)
         else:
             current.unlink(missing_ok=True)
+            # New profile units must not survive an unsuccessful first activation.
+            if (SYSTEMD / (JOB + '.service')).exists():
+                run(['systemctl', 'disable', '--now', JOB + '.timer'])
+                for suffix in ('.timer', '.service'):
+                    (SYSTEMD / (JOB + suffix)).unlink(missing_ok=True)
+                run(['systemctl', 'daemon-reload'])
             run(['systemctl', 'stop', 'astro-site'])
             save(NGINX_LOCATION, proxy_location(c) + '\n', 0o644)
             run(['nginx', '-t'])
@@ -387,6 +691,11 @@ def activate(c, release):
 
 
 def cleanup(c):
+    if (SYSTEMD / (JOB + '.service')).exists():
+        result = subprocess.run(['systemctl', 'is-active', JOB + '.service'],
+                                capture_output=True, text=True, check=False)
+        if result.stdout.strip() not in ('inactive', 'failed'):
+            return
     base = BASE / c['name']
     protected = {(base / name).resolve() for name in ('current', 'previous')}
     releases = sorted((base / 'releases').iterdir(), key=lambda p: p.name, reverse=True)
@@ -473,6 +782,7 @@ def _deploy(c, force, node):
             archive.seek(0)
             safe_extract(archive, release)
         kind = classify_release(release, mode)
+        profile = checked_profile(release, kind, c['runtime_profile']) if c.get('runtime_profile') else None
         if kind == 'static':
             if (release / 'node_modules').is_symlink():
                 (release / 'node_modules').unlink()
@@ -480,6 +790,7 @@ def _deploy(c, force, node):
                 shutil.rmtree(release / 'node_modules')
         save_json(release / 'release.json', {'commit': commit, 'node': str(node), 'fingerprint': fingerprint,
                                             'tools': VERSION, 'kind': kind,
+                                            'runtime_profile': profile,
                                             'container_prepare': c.get('container_prepare', False) and mode == 'server',
                                             'adapter_version': c.get('adapter_version')})
         # Runtime needs read access to metadata, but never write access.
@@ -617,6 +928,15 @@ def setup():
              'health': ask('Healthcheck-Pfad (muss ohne Anmeldung HTTP 200 liefern)', '/', lambda v: bool(re.fullmatch(r'/[A-Za-z0-9_./~%-]*', v))),
              'tls': ask('HTTPS: letsencrypt, proxy oder http (HTTP nur im vertrauenswürdigen Netz)', 'http', lambda v: v in ('http', 'proxy', 'letsencrypt')),
              'node_major': 24, 'keep': 3, 'proxy': '', 'email': ''}
+        selection = ask('Optionales Laufzeitprofil: keines, forms (allgemeine Formulare), workshop-registration',
+                        'keines', lambda v: v in ('keines', FORMS_ID, PROFILE_ID))
+        if selection != 'keines':
+            if RUNTIME.exists() or RUNTIME.is_symlink() or any(
+                    (SYSTEMD / (JOB + suffix)).exists() for suffix in ('.service', '.timer')):
+                raise RuntimeError('Vorhandene Formular-Pfade werden nicht übernommen; frischen Container verwenden.')
+            c['runtime_profile'] = selection
+            c['health'] = ask('Formular-Healthcheck-Pfad', '/health/',
+                              lambda v: bool(re.fullmatch(r'/[A-Za-z0-9_./~%-]*', v)))
         c['render_mode'] = ask('Betriebsmodus: auto (Original-Konfiguration) oder server (SSR erzwingen)',
                                'auto', lambda v: v in ('auto', 'server'))
         print('\nauto behält die Rendering-Einstellungen des Projekts bei. Statische Websites liefert Nginx direkt aus.\n'
@@ -723,6 +1043,8 @@ APT::Periodic::Unattended-Upgrade "1";
           'Verwaltung: astroctl status | astroctl logs | astroctl doctor')
     print('Änderungen in GitHub werden nach erfolgreichem Build automatisch veröffentlicht.'
           if c['automatic'] else 'Manuelles Deployment: astroctl deploy')
+    if c.get('runtime_profile'):
+        registration_guidance(c)
 
 
 def system_update():
@@ -730,6 +1052,110 @@ def system_update():
     run(['apt-get', '-s', '--no-remove', 'upgrade'])
     if yes('Die angezeigten Paketupdates installieren?'):
         run(['apt-get', '-o', 'DPkg::Lock::Timeout=120', '--no-remove', 'upgrade'])
+
+
+def registration_guidance(c, profile=None):
+    profile = profile or profile_spec(c.get('runtime_profile', PROFILE_ID))
+    prefix = profile_prefix(profile)
+    print('Formularprofil ' + profile['id'] + ': Freigabe über private Konfiguration prüfen.\n'
+          'Private Einstellungen: nano ' + str(RUNTIME / profile['config']['filename']) + '\n'
+          'Offen: E-Mail-Domains, Datenschutzhinweis, Aufbewahrung, Admin-Zugang und SMTP/TLS mit IT abstimmen.\n'
+          + prefix + '_ORIGIN mit URL und Astro security.allowedDomains abgleichen; Domain/Port prüfen.\n'
+          'HTTPS für Anmeldung und Verwaltungszugang erforderlich. Zertifikatsprüfung nicht abschalten.\n'
+          'Admin-Werkzeug: astroctl forms-admin [Argumente laut Website-Dokumentation]\n'
+          'SQLite-Sicherung: astroctl forms-backup\n'
+          'Nach Konfigurationsänderungen: systemctl restart astro-site')
+    if c['tls'] == 'http':
+        print('Betriebsfreigabe offen: aktuell HTTP; keine echten Anmeldungen freischalten.')
+
+
+def registration_diagnostics(c):
+    print('Gewähltes Runtime-Profil: ' + (c.get('runtime_profile') or 'keines'))
+    current = BASE / c['name'] / 'current'
+    active = release_profile(current) if current.exists() else None
+    print('Aktives Formularprofil: ' + (active['id'] + ' (Schema 1)' if active else 'keines'))
+    if not c.get('runtime_profile') and not active:
+        return
+    for suffix in ('.service', '.timer'):
+        result = subprocess.run(['systemctl', 'is-active', JOB + suffix], capture_output=True,
+                                text=True, check=False)
+        print(JOB + suffix + ': ' + ('aktiv' if result.returncode == 0 else 'inaktiv'))
+    env = (ETC / 'runtime.env').read_text()
+    if '/var/lib/makerlab' in env:
+        raise RuntimeError('Veralteter Runtime-Verweis auf /var/lib/makerlab; runtime.env prüfen.')
+    profile = active or profile_spec(c['runtime_profile'])
+    path = RUNTIME / profile['config']['filename']
+    readable = subprocess.run(['runuser', '-u', 'astrorun', '--', 'test', '-r', str(path)],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    if readable.returncode:
+        raise RuntimeError('Profil-Konfiguration für astrorun nicht lesbar; Elternverzeichnis 0750 und Datei 0640 prüfen.')
+    import grp
+    import pwd
+    gid = grp.getgrnam('astrorun').gr_gid
+    for target, mode in ((RUNTIME, 0o750), (path, 0o640)):
+        info = target.lstat()
+        if target.is_symlink() or info.st_uid != 0 or info.st_gid != gid or stat.S_IMODE(info.st_mode) != mode:
+            raise RuntimeError('Unsichere Profil-Konfigurationsrechte: ' + str(target))
+    data = BASE / c['name'] / 'data'
+    info = data.lstat()
+    if data.is_symlink() or info.st_uid != pwd.getpwnam('astrorun').pw_uid or stat.S_IMODE(info.st_mode) != 0o700:
+        raise RuntimeError('Profil-Datenverzeichnis muss astrorun gehören und Modus 0700 haben.')
+    value = limited_json(path)
+    dbfield, filename = next(iter(profile['config']['dataFileFields'].items()))
+    if value.get(dbfield) != str(data / filename):
+        raise RuntimeError(dbfield + ' verweist nicht auf das Projekt-Datenverzeichnis; Altpfad prüfen.')
+    variable = profile['config']['environmentVariable']
+    expected = variable + '=' + str(path)
+    assignments = [line.strip() for line in env.splitlines() if re.match(r'^\s*' + re.escape(variable) + r'\s*=', line)]
+    if assignments != [expected]:
+        raise RuntimeError(variable + ' in runtime.env fehlt oder ist widersprüchlich.')
+    print('Profil-Konfiguration lesbar; Datenrechte geprüft. Keine privaten Werte ausgegeben.')
+    registration_guidance(c, profile)
+
+
+def registration_tool(c, args):
+    current = BASE / c['name'] / 'current'
+    profile = release_profile(current)
+    if not profile:
+        raise RuntimeError('Kein aktives Formularprofil.')
+    registration_diagnostics(c)
+    if args[0] in ('registration-admin', 'forms-admin'):
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            raise RuntimeError('Admin-Werkzeug nur interaktiv im Terminal ausführen.')
+        node = json.loads((current / 'release.json').read_text())['node']
+        # No secrets in argv, no inherited root environment, no output capture.
+        run(['runuser', '-u', 'astrorun', '--', 'env', '-i', 'PATH=/usr/bin:/bin',
+             profile['config']['environmentVariable'] + '=' + str(RUNTIME / profile['config']['filename']),
+             node + '/bin/node', str(current / profile['tools']['admin']), *args[1:]], cwd=current)
+    else:
+        if len(args) != 1:
+            raise ValueError('registration-backup akzeptiert keine Argumente.')
+        data = BASE / c['name'] / 'data'
+        dbfile = next(iter(profile['config']['dataFileFields'].values()))
+        destination = data / (Path(dbfile).stem + '-backup-' + uuid.uuid4().hex + '.sqlite')
+        # Trusted installer code, executed without root privileges. SQLite backup
+        # includes committed WAL contents; never copy just the main DB file.
+        code = '''import os, sqlite3, sys
+os.umask(0o077)
+source = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True)
+partial = sys.argv[2] + '.partial'
+fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+os.close(fd)
+try:
+    with sqlite3.connect(partial) as target:
+        source.backup(target)
+    target.close()
+    os.replace(partial, sys.argv[2])
+finally:
+    source.close()
+'''
+        try:
+            run(['runuser', '-u', 'astrorun', '--', '/usr/bin/python3', '-c', code,
+                 str(data / dbfile), str(destination)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+        except (subprocess.SubprocessError, OSError):
+            raise RuntimeError('SQLite-Sicherung fehlgeschlagen; Datenbank und Datenrechte prüfen.') from None
+        print('Konsistente private Sicherung: ' + str(destination))
 
 
 def main():
@@ -740,6 +1166,7 @@ def main():
     command = args[0] if args else 'help'
     if command == 'help':
         print('astroctl: status | doctor | deploy | rebuild | pause | resume | rollback | logs\n'
+              '          forms-admin | forms-backup (auch registration-admin / registration-backup)\n'
               '          update --check | --system | --node | --tools')
         return
     with lock():
@@ -774,6 +1201,7 @@ def main():
             print((current / 'release.json').read_text() if current.exists() else 'Noch kein aktives Release.')
             if (STATE / 'failure.json').exists():
                 print((STATE / 'failure.json').read_text())
+            registration_diagnostics(c)
             if command == 'doctor':
                 run(['nginx', '-t'])
                 git(c, 'ls-remote', '--exit-code', c['repo'], 'refs/heads/' + c['branch'], capture=True)
@@ -785,6 +1213,8 @@ def main():
                 if not healthy(c):
                     raise RuntimeError('Website liefert lokal kein HTTP 200.')
                 print('Grundprüfungen erfolgreich.')
+        elif command in ('registration-admin', 'registration-backup', 'forms-admin', 'forms-backup'):
+            registration_tool(c, args)
         elif command == 'update' and len(args) == 2:
             if args[1] == '--system':
                 run(['apt-get', 'update'])
@@ -806,6 +1236,18 @@ def main():
 
 
 if __name__ == '__main__':
+    if sys.argv[1:2] == ['registration-enabled']:
+        # Runs as astrorun inside the job sandbox. Do not expose parsed values.
+        try:
+            profile = profile_spec(sys.argv[2] if len(sys.argv) == 3 else PROFILE_ID)
+            prefix = profile_prefix(profile)
+            value = limited_json(Path(os.environ[profile['config']['environmentVariable']]))
+            enabled = value.get(prefix + '_ENABLED') == 'true'
+            if enabled and not value.get(prefix + '_ORIGIN', '').startswith('https://'):
+                sys.exit(2)
+            sys.exit(0 if enabled else 1)
+        except (KeyError, ValueError, OSError):
+            sys.exit(2)
     try:
         main()
     except (Exception, KeyboardInterrupt) as error:

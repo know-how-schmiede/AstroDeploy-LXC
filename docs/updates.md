@@ -22,3 +22,12 @@ sichern, Tests ausführen und beide Python-Dateien nach /usr/local/lib/astrodepl
 sowie den Starter nach /usr/local/bin/astroctl übernehmen. Root-Eigentum,
 Python-Modus 644, Starter 755. Vorherige Dateien sichern. Schema-/Unitänderungen
 brauchen eine versionsspezifische Migration. Kein ungeprüftes main als root ausführen.
+
+## Workshop-Profil ab 0.4.0
+
+Ab 0.5.0 ist zusätzlich `runtime_profile: "forms"` für beliebige Repos mit
+dem [Formularvertrag](forms.md) verfügbar. Workshop-Konfiguration bleibt
+kompatibel. Profilwechsel migriert weder Daten noch Secrets zwischen den
+getrennten JSON-/SQLite-Dateien; Rollback verwendet die Metadaten des Releases.
+
+Alte config.json ohne `runtime_profile` bleibt gültig. Ausgewähltes Profil wird vor Aktivierung validiert; automatische Redeploys fragen nicht interaktiv. Node-Updates bauen weiterhin ein neues Release und binden auch den Worker an dessen Node-Version. Private Konfiguration wird nicht überschrieben. Betriebsvariablen und Wartungsablauf: [Workshop-Anmeldung](workshop-registration.md).

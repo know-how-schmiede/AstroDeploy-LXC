@@ -178,3 +178,16 @@ Weitere Anleitungen: [Updates](docs/updates.md), [Rollback](docs/rollback.md),
 [Fehlersuche](docs/troubleshooting.md), [Teststand](docs/testing.md).
 Die ursprünglichen Aufträge liegen unter [doku](doku/CODEX_ARBEITSANLEITUNG.md).
 Lizenz und Rechteinhaber müssen vor Veröffentlichung festgelegt werden.
+
+## Workshop-Anmeldung (0.4.0)
+
+Optionales Laufzeitprofil mit privater JSON-Konfiguration, Wartungstimer, releasegebundener Node-Version und SQLite-Sicherung. Einrichtung und Betriebsfreigabe: [Workshop-Anmeldung](docs/workshop-registration.md). Die Debian-13-LXC-Abnahme steht aus.
+
+## Allgemeine Formulare (0.5.0)
+
+Für andere Website-Repositories steht das optionale Profil `forms` bereit:
+private `forms.json`, eigenes Secret, `forms.sqlite`, Wartungsjob und
+`astroctl forms-admin` / `forms-backup`. Keine MakerLab-SMTP-Vorbelegung.
+Die Website liefert ihre Formularverarbeitung als geprüftes Buildpaket;
+der Installer ergänzt keine Formulare in fremdem Quellcode. Schnittstelle,
+Variablen und Einrichtung: [Allgemeine Formulare](docs/forms.md).

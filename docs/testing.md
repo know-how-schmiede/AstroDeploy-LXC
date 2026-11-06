@@ -1,4 +1,42 @@
-# Teststand vom 30.10.2026
+# Teststand 0.5.0 vom 06.11.2026
+
+Aktuell auf dem Windows-Entwicklungsrechner tatsächlich ausgeführt:
+
+- Python 3.12.15: `py_compile` für `lib/astrodeploy.py` und `lib/build.py` bestanden.
+- `unittest discover -s tests -v`: 60 Tests, 52 bestanden, acht unter Windows
+  übersprungen (POSIX-Symlinks bzw. Eigentümer/Gruppen/Modi). Keine Fehler.
+- Git Bash: `bash -n` für alle drei Starter bestanden.
+- ShellCheck-Aufruf versucht, lokal nicht installiert; Prüfung steht aus.
+- `git diff --check`: keine Whitespacefehler.
+
+Neue Tests prüfen explizite Profilmetadaten, exakten Schema-/Typ-/Pfadvertrag,
+Größenlimit und doppelte JSON-Schlüssel, fehlende Dateien, Symlinks,
+Erstkonfiguration/Secret-Erhalt und Rechte, Node-Bindung/Sandbox,
+Profilentfernung, Worker-Startbedingung ohne Versand, nginx mit ACL/TLS-Erhalt,
+Rücksicherung nach Syntaxfehler, Artefaktübergabe, Cleanup-Sperre und
+Timerwiederherstellung nach fehlgeschlagenem Healthcheck sowie konsistente
+SQLite-Sicherung mit noch geöffnetem WAL. Die acht übersprungenen
+Tests müssen unter Linux nachgeholt werden. Der vorhandene Linux-CI-Workflow
+wurde hier nicht ausgeführt.
+
+0.5.0 prüft zusätzlich das allgemeine Formularpaket ohne Workshop-/Event-Dateien,
+getrennte Daten-/Secret-Felder ohne institutionelle SMTP-Werte, Ablehnung von
+Hook-/Unit-Injektionen, die profilbezogene Worker-Startbedingung trotz alter
+Workshop-Environmentvariablen und die generische Worker-Unit. Der
+Website-Formularvertrag ist in [forms.md](forms.md) dokumentiert; eine konkrete
+Website-Formularimplementierung wurde in diesem Installer-Repository nicht erstellt.
+
+Kein Setup, kein Containerzugriff und kein Mailversand wurden ausgeführt.
+SMTP-Ausfall/Queue-Dauerhaftigkeit, Formular/Kapazität/Abmeldung/Admin/CSV,
+effektive Build-/Runtime-Rechte, SQLite-WAL-Backup, Node-Rollback und
+nginx-Logverhalten mit echten Token-URLs erfordern die Website und einen
+ausdrücklich freigegebenen frischen Debian-13-Test-LXC. Ablauf und Betriebsfreigabe:
+[Workshop-Anmeldung](workshop-registration.md) und
+[Arbeitsauftrag](arbeitsauftrag-workshop-anmeldung.md). Private Einstellungen
+und read-only Deploy-Key erst dort einrichten. Website-Paket muss vorher im
+Website-Branch verfügbar sein; echte Testmails nur nach separatem Auftrag.
+
+## Frühere Prüfungen (30.10.2026)
 
 Lokal unter Windows geprüft:
 

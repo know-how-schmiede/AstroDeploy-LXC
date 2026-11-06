@@ -20,6 +20,26 @@ abweichende Jobpfade werden vor dem Releasewechsel abgewiesen.
 
 ## Private Einstellungen und Freigabe
 
+### Ausdrücklich freigegebener HTTP-Betrieb
+
+Für den Hochschulserver wurde am 06.11.2026 HTTP ausdrücklich beauftragt.
+Optional erlaubt `"REGISTRATION_ALLOW_INSECURE_HTTP": "true"` im Workshop-Profil
+HTTP auch außerhalb des Testmodus. Ohne dieses Feld oder mit `"false"` bleibt
+HTTPS im Echtbetrieb Pflicht. Website und Installer müssen diese Option unterstützen;
+zuerst beide aktualisieren. Alte private Konfigurationen werden nicht überschrieben:
+das Feld bei Bedarf manuell in `/etc/astrodeploy-runtime/registration.json` ergänzen.
+`REGISTRATION_ORIGIN` muss exakt zur Browser-Origin passen; die Domain muss auch
+in Astro `security.allowedDomains` für HTTP erlaubt sein.
+
+HTTP überträgt Namen, E-Mail-Adressen, Abmeldelinks und Verwaltungszugang
+unverschlüsselt. Die frühere pauschale HTTPS-Vorgabe unten gilt für diesen
+ausdrücklich freigegebenen Ausnahmebetrieb nicht. SMTP/STARTTLS und dessen
+Zertifikatsprüfung bleiben unverändert; SMTP ist außerhalb des Testmodus Pflicht.
+Das allgemeine Profil `forms` erhält keine HTTP-Ausnahme.
+Nach Änderungen `systemctl restart astro-site` ausführen und `/health/` prüfen.
+Testmodus erst für den bewusst beauftragten Echtbetrieb abschalten; dies ermöglicht
+Mailversand an Teilnehmende. Keine automatische Freischaltung durch ein Update.
+
 `/etc/astrodeploy-runtime` gehört `root:astrorun`, Modus `0750`;
 `registration.json` darin hat `0640`. `/etc/astrodeploy` bleibt privat (`0700`).
 Build-Benutzer dürfen keiner Runtime-Gruppe angehören. Systemd liest

@@ -197,6 +197,19 @@ class RegistrationTests(unittest.TestCase):
             self.assertEqual(result.returncode, expected)
             self.assertEqual(result.stdout + result.stderr, b'')
 
+    def test_worker_http_requires_explicit_workshop_opt_in(self):
+        path = self.root / 'config.json'
+        for flag, origin, expected in [('true', 'http://site', 0),
+                                       ('false', 'http://site', 2),
+                                       ('true', 'ftp://site', 2)]:
+            path.write_text(json.dumps({'REGISTRATION_ENABLED': 'true',
+                                       'REGISTRATION_ORIGIN': origin,
+                                       'REGISTRATION_ALLOW_INSECURE_HTTP': flag}))
+            result = subprocess.run([sys.executable, str(Path(app.__file__)), 'registration-enabled'],
+                                    env={**os.environ, 'REGISTRATION_CONFIG': str(path)}, capture_output=True)
+            self.assertEqual(result.returncode, expected)
+            self.assertEqual(result.stdout + result.stderr, b'')
+
     def test_nginx_keeps_acl_tls_and_suppresses_access_log(self):
         site = self.root / 'nginx-site'
         location = self.root / 'nginx-location'

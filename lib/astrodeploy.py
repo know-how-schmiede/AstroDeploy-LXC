@@ -83,6 +83,7 @@ def initial_runtime_config(c, release, profile):
                   dbfield: str(BASE / c['name'] / 'data' / filename),
                   'SMTP_SECURE': 'false', 'SMTP_REQUIRE_TLS': 'true'})
     if profile['id'] == PROFILE_ID:
+        value['REGISTRATION_ALLOW_INSECURE_HTTP'] = 'false'
         value.update(SMTP_HOST='141.47.2.1', SMTP_PORT='25', SMTP_FROM='MakerLabTechnik@hs-pforzheim.de')
     else:
         # Generic installations must never inherit another operator's mail relay.
@@ -386,7 +387,9 @@ def checked_profile(release, kind, profile_id=PROFILE_ID):
                      *expected['tools'].values(), *extra]:
         regular_release_file(release, relative)
     template = limited_json(release / expected['config']['template'])
-    if not isinstance(template, dict) or set(template) != set(profile_fields(expected)) or any(
+    required = set(profile_fields(expected))
+    optional = {'REGISTRATION_ALLOW_INSECURE_HTTP'} if profile_id == PROFILE_ID else set()
+    if not isinstance(template, dict) or not required <= set(template) or not set(template) <= required | optional or any(
             not isinstance(v, str) or len(v) > 8192 or any(ord(ch) < 32 for ch in v)
             for v in template.values()):
         raise ValueError('Profil-Konfigurationsvorlage: bekannte String-Felder erforderlich.')
@@ -1074,12 +1077,13 @@ def registration_guidance(c, profile=None):
           'Private Einstellungen: nano ' + str(RUNTIME / profile['config']['filename']) + '\n'
           'Offen: E-Mail-Domains, Datenschutzhinweis, Aufbewahrung, Admin-Zugang und SMTP/TLS mit IT abstimmen.\n'
           + prefix + '_ORIGIN mit URL und Astro security.allowedDomains abgleichen; Domain/Port prüfen.\n'
-          'HTTPS für Anmeldung und Verwaltungszugang erforderlich. Zertifikatsprüfung nicht abschalten.\n'
+          'Workshop-HTTP nur mit REGISTRATION_ALLOW_INSECURE_HTTP=true: Daten und Zugang unverschlüsselt.\n'
+          'SMTP-Zertifikatsprüfung nicht abschalten.\n'
           'Admin-Werkzeug: astroctl forms-admin [Argumente laut Website-Dokumentation]\n'
           'SQLite-Sicherung: astroctl forms-backup\n'
           'Nach Konfigurationsänderungen: systemctl restart astro-site')
     if c['tls'] == 'http':
-        print('Betriebsfreigabe offen: aktuell HTTP; keine echten Anmeldungen freischalten.')
+        print('HTTP: Betriebsfreigabe und ausdrückliche Workshop-HTTP-Option prüfen; Übertragung unverschlüsselt.')
 
 
 def registration_diagnostics(c):
@@ -1256,7 +1260,11 @@ if __name__ == '__main__':
             prefix = profile_prefix(profile)
             value = limited_json(Path(os.environ[profile['config']['environmentVariable']]))
             enabled = value.get(prefix + '_ENABLED') == 'true'
-            if enabled and not value.get(prefix + '_ORIGIN', '').startswith('https://'):
+            origin = value.get(prefix + '_ORIGIN', '')
+            allow_http = (profile['id'] == PROFILE_ID and
+                          value.get('REGISTRATION_ALLOW_INSECURE_HTTP') == 'true')
+            if enabled and not (origin.startswith('https://') or
+                                (allow_http and origin.startswith('http://'))):
                 sys.exit(2)
             sys.exit(0 if enabled else 1)
         except (KeyError, ValueError, OSError):

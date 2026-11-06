@@ -56,3 +56,11 @@
 - Gemeinsamer sicherer Lifecycle, profilbezogene Startbedingung und Verwaltung
   über `forms-admin` / `forms-backup`; Workshop-Vertrag und alte Befehle erhalten.
 - Dokumentierter Vertrag für Website-Implementierungen und fünf zusätzliche Tests.
+
+## 0.5.1 – 2026-11-06
+
+- nginx ergänzt X-Forwarded-Host mit öffentlichem Host/Port für Astros
+  Herkunftsprüfung und erhält dabei bestehende Proxy-ACLs und TLS.
+- Migration alter generierter Proxyblöcke bleibt möglich; abweichende eigene
+  Forwarded-Host-Regeln erfordern manuelle Prüfung.
+- Drei Regressionstests für Headerergänzung, Konflikte und alte Inlineblöcke.

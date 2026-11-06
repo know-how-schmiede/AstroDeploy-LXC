@@ -228,6 +228,42 @@ class RegistrationTests(unittest.TestCase):
                 app.configure_runtime(self.c, 'server')
         self.assertEqual(location.read_text(), original)
 
+    def test_legacy_proxy_gains_forwarded_host_without_losing_acl(self):
+        location = self.root / 'nginx-location'
+        original = app.proxy_location(self.c, forwarded_host=False).replace(
+            'location / {', 'location / {\n        deny 192.0.2.1;') + '\n'
+        location.write_text(original)
+        with patch.object(app, 'migrate_nginx'), patch.object(app, 'NGINX_LOCATION', location), \
+                patch.object(app, 'release_profile', return_value=self.manifest), patch.object(app, 'run'):
+            app.configure_runtime(self.c, 'server')
+            app.configure_runtime(self.c, 'server')
+        content = location.read_text()
+        self.assertEqual(content.count('proxy_set_header X-Forwarded-Host $http_host;'), 1)
+        self.assertIn('deny 192.0.2.1;', content)
+        self.assertIn('access_log off;', content)
+
+    def test_conflicting_forwarded_host_is_not_overwritten(self):
+        location = self.root / 'nginx-location'
+        original = app.proxy_location(self.c).replace('X-Forwarded-Host $http_host', 'X-Forwarded-Host custom.example')
+        location.write_text(original)
+        with patch.object(app, 'migrate_nginx'), patch.object(app, 'NGINX_LOCATION', location), \
+                patch.object(app, 'release_profile', return_value=self.manifest), patch.object(app, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'X-Forwarded-Host'):
+                app.configure_runtime(self.c, 'server')
+            run.assert_not_called()
+        self.assertEqual(location.read_text(), original)
+
+    def test_original_inline_proxy_migrates_with_tls_preserved(self):
+        site = self.root / 'site'
+        location = self.root / 'nginx-location'
+        site.write_text('server {\nlisten 443 ssl;\nssl_certificate /existing;\n' +
+                        app.proxy_location(self.c, forwarded_host=False) + '\n}')
+        with patch.object(app, 'NGINX_SITE', site), patch.object(app, 'NGINX_LOCATION', location), \
+                patch.object(app, 'STATE', self.root), patch.object(app, 'run'):
+            app.migrate_nginx(self.c)
+        self.assertIn('ssl_certificate /existing;', site.read_text())
+        self.assertIn('include /etc/nginx/astrodeploy-location.conf;', site.read_text())
+
     def test_profile_package_survives_existing_artifact_handoff(self):
         stream = io.BytesIO()
         with tarfile.open(fileobj=stream, mode='w') as tar:

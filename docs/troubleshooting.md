@@ -34,6 +34,24 @@ Erreichbarkeit und ersetzt kein Sicherheitsaudit.
 
 ## Workshop-Anmeldung
 
+### Cross-site POST form submissions are forbidden
+
+Ab 0.5.1 setzt nginx zusätzlich
+`proxy_set_header X-Forwarded-Host $http_host;`. Der öffentliche Host und Port
+bleiben erhalten; eingehende Clientwerte dieses Headers werden überschrieben.
+Die Website muss den Host ausdrücklich in Astro `security.allowedDomains`
+erlauben. `REGISTRATION_ORIGIN` allein genügt nicht. Für den HTTP-Test auf
+192.168.1.211 den Eintrag `{ protocol: 'http', hostname: '192.168.1.211' }`
+zur vorhandenen Liste ergänzen und die Website neu bauen. Für Produktion die
+tatsächliche HTTPS-Domain verwenden. Vorhandene Konfiguration erhalten;
+keine Wildcard und kein `checkOrigin: false` als Fehlerbehebung verwenden.
+Der Installer schreibt Astro im Modus auto nicht um.
+
+Quelle: [Astro-Konfigurationsreferenz](https://docs.astro.build/en/reference/configuration-reference/#securityalloweddomains).
+Lokale Regressionstests bestehen; Formular-POST im Test-LXC noch offen.
+
+### Private Konfiguration
+
 Für das allgemeine [Formularprofil](forms.md) gelten dieselben Prüfungen mit
 `forms.json`, `FORMS_CONFIG`, `FORMS_DB` und `forms.sqlite`. Leere SMTP-Felder
 sind dort beabsichtigt und müssen vom jeweiligen Betreiber ergänzt werden.

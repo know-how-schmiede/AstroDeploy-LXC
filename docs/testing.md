@@ -1,9 +1,9 @@
-# Teststand 0.5.0 vom 06.11.2026
+# Teststand 0.5.1 vom 06.11.2026
 
 Aktuell auf dem Windows-Entwicklungsrechner tatsächlich ausgeführt:
 
 - Python 3.12.15: `py_compile` für `lib/astrodeploy.py` und `lib/build.py` bestanden.
-- `unittest discover -s tests -v`: 60 Tests, 52 bestanden, acht unter Windows
+- `unittest discover -s tests`: 63 Tests, 55 bestanden, acht unter Windows
   übersprungen (POSIX-Symlinks bzw. Eigentümer/Gruppen/Modi). Keine Fehler.
 - Git Bash: `bash -n` für alle drei Starter bestanden.
 - ShellCheck-Aufruf versucht, lokal nicht installiert; Prüfung steht aus.

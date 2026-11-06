@@ -22,7 +22,7 @@ import time
 import urllib.request
 import uuid
 
-VERSION = '0.5.0'
+VERSION = '0.5.1'
 RUNTIME = Path('/etc/astrodeploy-runtime')
 SYSTEMD = Path('/etc/systemd/system')
 PROFILE_ID = 'workshop-registration'
@@ -540,13 +540,14 @@ def classify_release(release, mode):
     raise RuntimeError('Keine passende Buildausgabe in dist. Für SSR wird dist/server/entry.mjs benötigt.')
 
 
-def proxy_location(c):
+def proxy_location(c, forwarded_host=True):
     proto = '$astro_proto' if c['tls'] == 'proxy' else '$scheme'
+    host = '        proxy_set_header X-Forwarded-Host $http_host;\n' if forwarded_host else ''
     return f'''    location / {{
         proxy_pass http://127.0.0.1:{c['port']};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+{host}        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto {proto};
     }}'''
@@ -571,10 +572,12 @@ def migrate_nginx(c):
     include = '    include /etc/nginx/astrodeploy-location.conf;'
     if include in text:
         return
-    old = proxy_location(c)
-    if text.count(old) != 1:
+    candidates = [proxy_location(c), proxy_location(c, forwarded_host=False)]
+    matches = [block for block in candidates if text.count(block) == 1]
+    if len(matches) != 1:
         raise RuntimeError('Eigene Nginx-Konfiguration wurde verändert. Automatische Migration abgebrochen; '
                            'siehe docs/static-hosting.md.')
+    old = matches[0]
     backup = STATE / 'nginx-before-0.3.conf'
     if not backup.exists():
         save(backup, text)
@@ -602,8 +605,18 @@ def configure_runtime(c, kind):
             raise RuntimeError('Unbekannte Nginx-Location; manuelle Prüfung erforderlich.')
         desired = clean
     elif original and kind == 'static' and original.replace(privacy, '') not in (
-            location_content(c, 'static'), location_content(c, 'server')):
+            location_content(c, 'static'), location_content(c, 'server'),
+            proxy_location(c, forwarded_host=False) + '\n'):
         raise RuntimeError('Angepasste Nginx-Location vor static-Wechsel manuell prüfen.')
+    if kind == 'server':
+        # Overwrite client-supplied forwarded host at this proxy boundary. Keep
+        # the public port; Astro must allow this host in security.allowedDomains.
+        header = 'proxy_set_header X-Forwarded-Host $http_host;'
+        existing = re.findall(r'proxy_set_header\s+X-Forwarded-Host\s+[^;]*;', desired, re.I)
+        if existing and existing != [header]:
+            raise RuntimeError('Eigener X-Forwarded-Host-Header: Nginx-Konfiguration manuell prüfen.')
+        if not existing:
+            desired = desired.replace('location / {\n', 'location / {\n        ' + header + '\n', 1)
     if profile:
         desired = desired.replace('location / {\n', 'location / {\n' + privacy, 1)
     save(NGINX_LOCATION, desired, 0o644)
